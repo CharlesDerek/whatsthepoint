@@ -51,7 +51,7 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath wtp-${{ matrix.target }}.zip
           $Hash = (Get-FileHash wtp-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower()
           "$Hash  wtp-${{ matrix.target }}.zip" | Set-Content wtp-${{ matrix.target }}.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wtp-${{ matrix.target }}
           path: |
