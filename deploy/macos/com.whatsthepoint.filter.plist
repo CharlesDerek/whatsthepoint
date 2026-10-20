@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.whatsthepoint.filter</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/wtp</string>
+    <string>--config</string><string>/Library/Application Support/WhatsThePoint/wtp.toml</string>
+    <string>--data-dir</string><string>/Library/Application Support/WhatsThePoint/data</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ExitTimeOut</key><integer>60</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/var/log/whatsthepoint.log</string>
+  <key>StandardErrorPath</key><string>/var/log/whatsthepoint-error.log</string>
+</dict>
+</plist>

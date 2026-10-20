@@ -1,0 +1,60 @@
+name: Package release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Archive Unix executable and deployment files
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/wtp package/
+          cp README.md LICENSE SECURITY.md THIRD_PARTY.md package/
+          cp -r deploy docs package/
+          tar -czf wtp-${{ matrix.target }}.tar.gz -C package .
+          shasum -a 256 wtp-${{ matrix.target }}.tar.gz > wtp-${{ matrix.target }}.sha256
+      - name: Archive Windows executable and deployment files
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory package
+          Copy-Item target/${{ matrix.target }}/release/wtp.exe package/
+          Copy-Item README.md,LICENSE,SECURITY.md,THIRD_PARTY.md package/
+          Copy-Item -Recurse deploy,docs package/
+          Compress-Archive -Path package/* -DestinationPath wtp-${{ matrix.target }}.zip
+          $Hash = (Get-FileHash wtp-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower()
+          "$Hash  wtp-${{ matrix.target }}.zip" | Set-Content wtp-${{ matrix.target }}.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wtp-${{ matrix.target }}
+          path: |
+            wtp-*.tar.gz
+            wtp-*.zip
+            wtp-*.sha256

@@ -1,0 +1,11 @@
+{
+  "name": "whatsthepoint-console-tests",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "check": "node --check web/app.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

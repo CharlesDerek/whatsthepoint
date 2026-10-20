@@ -1,0 +1,45 @@
+[package]
+name = "whatsthepoint"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "A small, opinionated DNS filter with an unusually honest name."
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/CharlesDerek/whatsthepoint"
+default-run = "wtp"
+
+[[bin]]
+name = "wtp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+hickory-proto = "0.26.3"
+idna = "1"
+ipnet = { version = "2", features = ["serde"] }
+lru = "0.19"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "derive", "migrate", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.9"
+tower-http = { version = "0.6", features = ["limit", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+strip = true

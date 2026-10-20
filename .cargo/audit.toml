@@ -1,0 +1,6 @@
+[advisories]
+# SQLx 0.8's optional MySQL driver puts RSA in Cargo.lock even though only
+# SQLite is enabled. Neither sqlx-mysql nor rsa is compiled into WTP.
+# CI separately asserts their absence from the active dependency graph.
+# Remove this exception if MySQL or RSA is ever enabled.
+ignore = ["RUSTSEC-2023-0071"]
