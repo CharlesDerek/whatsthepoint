@@ -29,7 +29,7 @@ jobs:
       - run: python scripts/check-platform-plans.py
       - run: python scripts/check-dependencies.py
       - run: cargo build --release --locked
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wtp-${{ runner.os }}-${{ runner.arch }}
           path: |
@@ -59,7 +59,7 @@ jobs:
         run: python3 tests/endpoint/release_probe.py --chrome "$(node -e "process.stdout.write(require('playwright').chromium.executablePath())")"
       - name: Kernel enforcement in disposable network namespaces
         run: python3 scripts/linux-integration.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: console-screenshots

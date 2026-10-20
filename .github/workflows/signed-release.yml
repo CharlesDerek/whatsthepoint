@@ -33,7 +33,7 @@ jobs:
           WTP_APP_IDENTITY: ${{ vars.WTP_APP_IDENTITY }}
           WTP_INSTALLER_IDENTITY: ${{ vars.WTP_INSTALLER_IDENTITY }}
           WTP_NOTARY_PROFILE: ${{ vars.WTP_NOTARY_PROFILE }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wtp-signed-${{ matrix.platform }}
           path: signed-dist/*
