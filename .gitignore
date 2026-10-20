@@ -40,3 +40,8 @@ Thumbs.db
 /signed-dist/
 __pycache__/
 *.pyc
+
+# Single-use pairing exports contain private enrollment secrets.
+*-invitation.json
+*.pairing.json
+*-pairing.json

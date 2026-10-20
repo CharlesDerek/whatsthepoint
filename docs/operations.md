@@ -112,7 +112,9 @@ A stopped task causes DNS failure until restarted or DNS is restored. Test start
 
 ## Remote console
 
-The application speaks HTTP. TLS belongs at a reverse proxy, with the backend kept on loopback. Example `wtp.toml`:
+Use [native LAN HTTPS](paired-control.md) for the hybrid post-quantum listener and paired desktop/agent control. `wtp lan-init` binds the service to a specific LAN address and generates its TLS identity.
+
+For a legacy browser-only portal, HTTP behind a TLS reverse proxy remains supported with the backend kept on loopback. Pairing is unavailable through that path. Example `wtp.toml`:
 
 ```toml
 http_bind = "127.0.0.1:8080"

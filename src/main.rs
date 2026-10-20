@@ -28,6 +28,26 @@ enum Command {
     },
     /// Run the DNS resolver and embedded management console.
     Serve,
+    /// Create a pinned TLS identity and a configuration bound to a LAN address.
+    LanInit {
+        #[arg(long)]
+        address: std::net::IpAddr,
+        #[arg(long, default_value_t = 24)]
+        prefix: u8,
+        #[arg(long, default_value_t = 8443)]
+        port: u16,
+        #[arg(long, default_value_t = 5354)]
+        dns_port: u16,
+        #[arg(long, default_value = "wtp.toml")]
+        output: PathBuf,
+    },
+    /// Export a single-use desktop invitation using local administrator recovery access.
+    PairConsole {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Print a starter TOML configuration.
     Config,
     /// Explain the local policy decision for a domain without contacting an upstream.
@@ -65,6 +85,28 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if matches!(cli.command, Command::Config) {
         println!("{}", toml::to_string_pretty(&Config::default())?);
+        return Ok(());
+    }
+    if let Command::LanInit {
+        address,
+        prefix,
+        port,
+        dns_port,
+        ref output,
+    } = cli.command
+    {
+        anyhow::ensure!(
+            !output.exists(),
+            "Configuration exists; choose a new output path"
+        );
+        let config = whatsthepoint::tls::provision(&cli.data_dir, address, port, dns_port, prefix)?;
+        wtp_control::vault::atomic_write(output, toml::to_string_pretty(&config)?.as_bytes())?;
+        println!(
+            "LAN portal: {}\nTLS trust certificate: {}\nConfiguration: {}",
+            config.public_origin,
+            config.tls_certificate.as_ref().unwrap().display(),
+            output.display()
+        );
         return Ok(());
     }
     let config = Config::load(cli.config.as_deref())?;
@@ -131,8 +173,25 @@ async fn main() -> anyhow::Result<()> {
                 serde_json::to_string_pretty(&policy::Policy::load(&pool).await?.decide(&domain))?
             );
         }
+        Command::PairConsole { name, output } => {
+            anyhow::ensure!(!output.exists(), "Refusing to overwrite an invitation file");
+            let owner: String =
+                sqlx::query_scalar("SELECT username FROM admins ORDER BY username LIMIT 1")
+                    .fetch_one(&pool)
+                    .await
+                    .context("Initialize an administrator first")?;
+            let app = App::new(pool.clone(), config).await?;
+            let bundle = whatsthepoint::control_api::issue(&app, &owner, &name, "console", None)
+                .await
+                .map_err(|e| anyhow::anyhow!(e.1))?;
+            wtp_control::vault::atomic_write(&output, &serde_json::to_vec_pretty(&bundle)?)?;
+            println!(
+                "Single-use desktop invitation saved to {} (expires in ten minutes)",
+                output.display()
+            );
+        }
         Command::Serve => serve(App::new(pool.clone(), config).await?).await?,
-        Command::Config => unreachable!(),
+        Command::Config | Command::LanInit { .. } => unreachable!(),
     }
     pool.close().await;
     Ok(())
@@ -166,7 +225,23 @@ async fn serve(app: App) -> anyhow::Result<()> {
     ));
     tracing::info!(dns = %app.config.dns_bind, console = %app.config.public_origin, "What's the Point is running");
     let http_cancel = cancel.clone();
+    let tls = app
+        .config
+        .tls_certificate
+        .as_ref()
+        .zip(app.config.tls_private_key.as_ref())
+        .map(|(cert, key)| whatsthepoint::tls::server_config(cert, key))
+        .transpose()?;
     let mut http_server = tokio::spawn(async move {
+        if let Some(tls) = tls {
+            return whatsthepoint::tls::serve(
+                http,
+                whatsthepoint::api::router(app),
+                tls,
+                http_cancel,
+            )
+            .await;
+        }
         axum::serve(
             http,
             whatsthepoint::api::router(app)

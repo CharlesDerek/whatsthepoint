@@ -5,7 +5,7 @@
   <a href="https://github.com/CharlesDerek/whatsthepoint/actions/workflows/ci.yml"><img src="https://github.com/CharlesDerek/whatsthepoint/actions/workflows/ci.yml/badge.svg" alt="Build and test"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-green" alt="AGPL 3.0 or later"></a>
   <img src="https://img.shields.io/badge/built_with-Rust-orange" alt="Built with Rust">
-  <img src="https://img.shields.io/badge/release-v0.2-blue" alt="Version 0.2">
+  <img src="https://img.shields.io/badge/release-v0.3-blue" alt="Version 0.3">
 </p>
 <p align="center">
   <a href="#platform-overview">Platform</a> ·
@@ -32,13 +32,14 @@ The enterprise layout is here so procurement can relax. The source code is here 
 
 ![The management console showing four actual test DNS requests](docs/console.png)
 
-> **Release status — v0.2:** Browser and endpoint enforcement are implemented. Linux kernel enforcement has been tested locally. Windows/macOS adapters pass Rust cross-checks; native firewall acceptance and production publisher signing remain outstanding. A platform column is not a test result, even when the table is very attractive.
+> **Release status — v0.3:** Browser and endpoint enforcement, LAN HTTPS, a paired desktop console, encrypted credential pools, replay-resistant control requests, and locally authorized remote removal are implemented. Linux kernel enforcement has been tested locally. Earlier Windows/macOS firewall adapters passed Rust cross-checks; the new control channel and removal paths still require native platform acceptance; native firewall acceptance and production publisher signing remain outstanding. A platform column is not a test result, even when the table is very attractive.
 
 ## Platform overview
 
 | Layer | What it does | Where it runs |
 | :--- | :--- | :--- |
-| **Management portal** | Rules, desktop profiles, device enrollment, policy diagnostics, activity, quarantine, and restore | Self-hosted Rust service with local SQLite storage |
+| **Management portal** | Rules, desktop profiles, device enrollment, policy diagnostics, activity, quarantine, restore, paired principals, and remote agent removal | Self-hosted Rust service with local SQLite storage |
+| **Paired desktop console** | The same portal UI, saved master identities, encrypted credentials and hybrid post-quantum TLS | Native Rust broker with a browser app window |
 | **DNS filtering** | Domain/subdomain rules, blocklists, encrypted upstream resolution, caching, and alias checks | Linux, Windows, or macOS server |
 | **Browser protection** | URL checks, ordered organization/group/profile rules, page categories, and a sanitized reader | Chrome, Chromium, and Edge |
 | **Desktop identity** | Reports the launching OS account’s Unix UID or Windows SID | Native companion on the desktop |
@@ -100,6 +101,27 @@ These commands test the resolver. To filter a device’s normal DNS traffic, con
 
 ## Deployment
 
+### LAN access and paired desktops
+
+```sh
+./target/release/wtp --data-dir data lan-init --address 192.168.1.10 --prefix 24 --output wtp.toml
+./target/release/wtp --data-dir data --config wtp.toml serve
+./target/release/wtp-desktop open
+```
+
+Replace the example address with this machine’s stable LAN address. The portal is
+then at **https://192.168.1.10:8443**. Trust the generated certificate in your browser,
+create an invitation under **Paired consoles**, and pair the desktop using a local
+vault passphrase. The native channel requires TLS 1.3 with X25519 + ML-KEM-768;
+recorded requests cannot simply be replayed. Adding “quantum” to the brochure was
+considerably easier than writing the rejection tests, so we did both.
+
+[LAN setup, desktop pairing and remote removal](docs/paired-control.md) explains
+certificate trust, principal roles, MAC/account/master identity hashes, encrypted
+token pools, renewal, replay protection and the exact post-quantum boundary.
+Remote uninstall requires an explicit setting in the locally protected agent config.
+It is a fixed, signed operation. The portal has not been given a “run whatever” box.
+
 ### Browser protection
 
 In **Browser protection**, enroll a desktop profile and copy its token. For development, load **extension/** as an unpacked extension, then enter the portal origin and token. Native OS identity requires registering `wtp-native`; enforced deployments require administrator-managed browser policies.
@@ -149,7 +171,7 @@ The default [Quad9 secure service](https://quad9.net/service/service-addresses-a
 
 For LAN use, bind DNS to the server’s LAN IP, add the intended subnet to `allowed_clients`, and restrict firewall access accordingly. Configure IPv6 deliberately; an IPv6 wildcard does not imply IPv4 support on every OS. Each instance supports one DNS listening address.
 
-For a remote portal, keep its listener on loopback, terminate TLS with a reverse proxy, and set `public_origin` to the exact HTTPS origin without a trailing slash. See [remote console setup](docs/operations.md#remote-console).
+For paired clients, use the native HTTPS listener generated by `lan-init`. A legacy browser-only portal may still use a loopback backend behind a TLS reverse proxy. See [remote console setup](docs/operations.md#remote-console).
 
 Local configuration, databases, logs, build artifacts, and agent instruction/context files are gitignored.
 
@@ -184,6 +206,7 @@ The security model is written down. This has proved more useful than printing a 
 | **Browser inspection** | URL gating, visible-text categories, and a restricted reader | Normal interactive pages are inspected after loading; this is not pre-execution malware isolation |
 | **Device identity** | Native Unix UID / Windows SID reporting and profile binding | Account reports are not hardware attestation |
 | **Network enforcement** | Signed destination/interface allowlists, expiry, quarantine, and firewall repair | Local administrators/root can remove controls; approved destinations can carry tunnels |
+| **Paired control** | Hybrid ML-KEM TLS, pinned master identity, HMAC request/response authentication, durable nonce rejection, encrypted local credential pools | MACs are public context; certificates and offline Ed25519 signatures remain classical; local privileged access can steal credentials |
 | **Data handling** | Local SQLite configuration/history, bounded retention, optional query logging | Operators control storage permissions, backups, and disk protection |
 | **Release integrity** | Independent artifact verification, CRX3 checks, native signing workflows | Trusted publisher credentials and production distribution must be supplied and validated |
 
@@ -199,10 +222,10 @@ Read [SECURITY.md](SECURITY.md) before deployment. WTP does not silently change 
 
 | Component | Evidence available | Still required |
 | :--- | :--- | :--- |
-| **Rust service and policy engine** | 27 passing local Rust tests covering DNS, authentication, APIs, identity, signatures, and policy state | Independent security review and performance benchmarks |
-| **Portal and extension** | 3 JavaScript tests and 4 Chromium integration tests, including HTTPS enrollment, navigation blocking, categories, reader isolation, and revocation | Broader browser/version and managed-fleet acceptance |
-| **Linux endpoint** | Real isolated-kernel IPv4/IPv6, DNS restrictions, signature rejection, drift repair, expiry, quarantine, TLS retrieval, and rollback tests | Deployment-specific service/reboot and fleet acceptance |
-| **Windows and macOS endpoint** | Rust cross-checks; PowerShell scripts parse; native CI checks are configured | Native firewall activation, live-connection behavior, reboot, and rollback acceptance |
+| **Rust service and policy engine** | 35 passing local Rust tests covering DNS, authentication, APIs, identity, signatures, and policy state | Independent security review and performance benchmarks |
+| **Portal and extension** | 3 JavaScript tests and 5 Chromium integration tests, including HTTPS enrollment, navigation blocking, categories, reader isolation, and revocation | Broader browser/version and managed-fleet acceptance |
+| **Linux endpoint** | Real isolated-kernel IPv4/IPv6, DNS restrictions, signature rejection, drift repair, expiry, quarantine, TLS retrieval, hybrid pairing, encrypted credentials, signed remote uninstall, and rollback tests | Deployment-specific service/reboot and fleet acceptance |
+| **Windows and macOS endpoint** | Earlier firewall-adapter Rust cross-checks; native CI checks are configured for the new control channel | Native firewall activation, live-connection behavior, reboot, and rollback acceptance |
 | **Distribution** | Disposable-key artifact/CRX3 signing and independent corruption rejection | Production certificates, Apple notarization, store/feed publication, and managed update acceptance |
 
 The native CI matrix targets Linux x64, Windows x64, macOS Apple Silicon, and macOS Intel. A configured job is not a claim that every deployment scenario has passed. Green badges are lovely; evidence is less decorative.
@@ -249,6 +272,7 @@ These are outstanding work items. The roadmap is not a feature list with the ten
 | [Operations](docs/operations.md) | DNS service setup, remote portal, platform configuration, and rollback |
 | [Browser protection](docs/browser-protection.md) | Desktop profiles, rule order, categories, reader behavior, and managed installation |
 | [Endpoint enforcement](docs/endpoint-enforcement.md) | Signed policies, privileged agents, quarantine, recovery, and validated scope |
+| [LAN and paired consoles](docs/paired-control.md) | Native hybrid TLS, desktop vaults, principals, replay protection, and remote uninstall |
 | [Release signing](docs/release-signing.md) | Artifact verification, native publisher signing, and extension distribution |
 | [Security model](SECURITY.md) | Trust boundaries, resource limits, and vulnerability reporting |
 | [Contributing](CONTRIBUTING.md) | Development workflow and contribution requirements |

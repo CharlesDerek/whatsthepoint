@@ -34,8 +34,9 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p package
-          cp target/${{ matrix.target }}/release/wtp target/${{ matrix.target }}/release/wtp-native target/${{ matrix.target }}/release/wtp-agent package/
+          mkdir -p package/web
+          cp web/favicon.svg package/web/
+          cp target/${{ matrix.target }}/release/wtp target/${{ matrix.target }}/release/wtp-native target/${{ matrix.target }}/release/wtp-agent target/${{ matrix.target }}/release/wtp-desktop package/
           cp README.md LICENSE SECURITY.md THIRD_PARTY.md package/
           cp -r deploy docs extension package/
           tar -czf wtp-${{ matrix.target }}.tar.gz -C package .
@@ -44,8 +45,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory package
-          Copy-Item target/${{ matrix.target }}/release/wtp.exe,target/${{ matrix.target }}/release/wtp-native.exe,target/${{ matrix.target }}/release/wtp-agent.exe package/
+          New-Item -ItemType Directory package/web
+          Copy-Item web/favicon.svg package/web/
+          Copy-Item target/${{ matrix.target }}/release/wtp.exe,target/${{ matrix.target }}/release/wtp-native.exe,target/${{ matrix.target }}/release/wtp-agent.exe,target/${{ matrix.target }}/release/wtp-desktop.exe package/
           Copy-Item README.md,LICENSE,SECURITY.md,THIRD_PARTY.md package/
           Copy-Item -Recurse deploy,docs,extension package/
           Compress-Archive -Path package/* -DestinationPath wtp-${{ matrix.target }}.zip

@@ -9,7 +9,7 @@ if output.exists():raise SystemExit('Refusing to overwrite signed-dist')
 output.mkdir()
 with tempfile.TemporaryDirectory(prefix='wtp-package-') as work:
     work=pathlib.Path(work);package=work/'package';package.mkdir();binaries=work/'binaries';binaries.mkdir()
-    for name in ['wtp','wtp-native','wtp-agent']:shutil.copy2(root/f'target/release/{name}{suffix}',binaries/f'{name}{suffix}')
+    for name in ['wtp','wtp-native','wtp-agent','wtp-desktop']:shutil.copy2(root/f'target/release/{name}{suffix}',binaries/f'{name}{suffix}')
     if system=='Windows':
         subprocess.run(['powershell','-NoProfile','-NonInteractive','-File',str(root/'scripts/release/sign-windows.ps1'),'-Directory',str(binaries),'-PublisherThumbprint',os.environ['WTP_WINDOWS_THUMBPRINT']],check=True)
     elif system=='Darwin':
@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix='wtp-package-') as work:
     for file in binaries.iterdir():shutil.copy2(file,package/file.name)
     for name in ['deploy','docs','extension']:
         shutil.copytree(root/name,package/name,ignore=shutil.ignore_patterns('_metadata','__pycache__','*.pem','*.key','*.pfx','*.p12'))
+    (package/'web').mkdir();shutil.copy2(root/'web/favicon.svg',package/'web/favicon.svg')
     for name in ['README.md','LICENSE','SECURITY.md','THIRD_PARTY.md']:shutil.copy2(root/name,package/name)
     (package/'BUILD.json').write_text(json.dumps({'platform':system,'architecture':platform.machine(),'revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),'extension':'source; package and distribute separately','public_key':public},indent=2))
     archive=pathlib.Path(shutil.make_archive(str(output/f'wtp-{system.lower()}-{platform.machine()}'),'zip',package))

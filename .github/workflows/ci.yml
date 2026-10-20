@@ -1,7 +1,7 @@
 name: Build and test
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
@@ -23,7 +23,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo build --locked -p wtp-endpoint
       - run: python scripts/check-platform-plans.py
@@ -39,6 +39,8 @@ jobs:
             target/release/wtp-native.exe
             target/release/wtp-agent
             target/release/wtp-agent.exe
+            target/release/wtp-desktop
+            target/release/wtp-desktop.exe
           if-no-files-found: error
   browser:
     name: Console and extension · Chromium

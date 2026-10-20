@@ -1,6 +1,6 @@
 [package]
 name = "whatsthepoint"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.91"
 description = "Portal-managed DNS, browser, and endpoint filtering with desktop profiles."
@@ -13,6 +13,13 @@ name = "wtp"
 path = "src/main.rs"
 
 [dependencies]
+wtp-control = { path = "crates/control" }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs", "prefer-post-quantum"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs"] }
+rustls-pemfile = "2"
+rcgen = "0.14"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+tower = { version = "0.5", features = ["util"] }
 wtp-endpoint = { path = "crates/endpoint" }
 anyhow = "1"
 argon2 = "0.5"
@@ -46,6 +53,6 @@ lto = "thin"
 strip = true
 
 [workspace]
-members = ["crates/endpoint"]
-default-members = [".", "crates/endpoint"]
+members = ["crates/endpoint", "crates/control", "crates/desktop"]
+default-members = [".", "crates/endpoint", "crates/control", "crates/desktop"]
 resolver = "3"

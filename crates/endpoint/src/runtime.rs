@@ -168,6 +168,8 @@ pub struct Status {
     pub checked_at: i64,
     pub detail: String,
     pub fingerprint: String,
+    #[serde(default)]
+    pub remote_uninstall: bool,
 }
 fn status(state: &Path, value: &Status) -> anyhow::Result<()> {
     atomic_write(&state.join("status.json"), &serde_json::to_vec(value)?)
@@ -183,6 +185,30 @@ fn quote(value: &str) -> String {
     )
 }
 pub fn fetch(config: &AgentConfig, status: &Status) -> anyhow::Result<Envelope> {
+    ensure!(
+        config.paired_master.is_none(),
+        "Installed paired agents refresh through their encrypted credential pool; use status to inspect them"
+    );
+    if let Some(bundle) = &config.pairing {
+        // Preflight pins the same master and hybrid suite without consuming enrollment.
+        let response = wtp_control::client::http(&bundle.master)?
+            .post(format!("{}/endpoint/policy", config.portal))
+            .header("X-WTP-Request", "1")
+            .bearer_auth(&config.token)
+            .json(status)
+            .send()?
+            .error_for_status()?;
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        response
+            .take(crate::MAX_ENVELOPE + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= crate::MAX_ENVELOPE as usize,
+            "Portal response exceeds limit"
+        );
+        return Ok(serde_json::from_slice(&bytes)?);
+    }
     let origin = url::Url::parse(&config.portal)?;
     let host = origin
         .host_str()
@@ -272,6 +298,7 @@ pub fn activate(config_path: &Path, state: &Path, envelope: &Envelope) -> anyhow
                 checked_at: crate::now(),
                 detail: "Signed policy applied".into(),
                 fingerprint,
+                remote_uninstall: config.allow_remote_uninstall,
             };
             status(state, &result)?;
             Ok(result)
@@ -285,6 +312,7 @@ pub fn activate(config_path: &Path, state: &Path, envelope: &Envelope) -> anyhow
                 checked_at: crate::now(),
                 detail: "Policy application failed; management-only egress".into(),
                 fingerprint,
+                remote_uninstall: config.allow_remote_uninstall,
             };
             status(state, &result)?;
             Err(error)
@@ -304,7 +332,7 @@ pub fn run(config_path: &Path, state: &Path) -> anyhow::Result<()> {
     protected(config_path)?;
     protected(state)?;
     let _lock = lock(state)?;
-    let config: AgentConfig = read_json(config_path)?;
+    let mut config: AgentConfig = read_json(config_path)?;
     config.validate()?;
     ensure!(
         config.platform == std::env::consts::OS,
@@ -340,8 +368,10 @@ pub fn run(config_path: &Path, state: &Path) -> anyhow::Result<()> {
         checked_at: crate::now(),
         detail: "Startup enforcement".into(),
         fingerprint: platform::apply(&bootstrap, state, &config.platform)?,
+        remote_uninstall: config.allow_remote_uninstall,
     };
     status(state, &current)?;
+    crate::managed::enroll(config_path, state, &mut config)?;
     let mut next_poll = Instant::now();
     loop {
         let now = crate::now();
@@ -365,7 +395,14 @@ pub fn run(config_path: &Path, state: &Path) -> anyhow::Result<()> {
             current.detail = "Firewall drift detected and repaired".into();
         }
         if Instant::now() >= next_poll {
-            match fetch(&config, &current).and_then(|e| {
+            let fetched = crate::managed::fetch(&config, state, &current);
+            if let Ok(reply) = &fetched
+                && let Some(command) = &reply.command
+                && crate::managed::handle_command(config_path, state, &config, command)?
+            {
+                return Ok(());
+            }
+            match fetched.map(|reply| reply.policy).and_then(|e| {
                 let (p, w) = verified(&e, &config, &watermark)?;
                 Ok((e, p, w))
             }) {

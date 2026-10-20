@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "What's the Point — Browser Protection",
-  "version": "0.2.0",
-  "minimum_chrome_version": "121",
+  "version": "0.3.0",
+  "minimum_chrome_version": "131",
   "description": "Portal-managed URL checks, content categories, desktop profiles, and a sanitized reader.",
   "permissions": ["storage", "declarativeNetRequest", "webNavigation", "alarms", "nativeMessaging"],
   "host_permissions": ["http://*/*", "https://*/*"],

@@ -1,7 +1,9 @@
 //! Signed, bounded, replay-resistant endpoint policy and platform rule compilers.
 //! No policy string is ever evaluated as a shell command.
+pub mod managed;
 pub mod platform;
 pub mod runtime;
+pub mod uninstall;
 use anyhow::{Context, ensure};
 pub use ed25519_dalek::SigningKey;
 use ed25519_dalek::{Signature, Signer, VerifyingKey};
@@ -209,6 +211,12 @@ pub struct AgentConfig {
     /// Bootstrap uplinks are administrator-controlled; never learned from an untrusted response.
     pub interfaces: Vec<String>,
     pub dhcp: bool,
+    #[serde(default)]
+    pub pairing: Option<wtp_control::PairBundle>,
+    #[serde(default)]
+    pub paired_master: Option<wtp_control::Master>,
+    #[serde(default)]
+    pub allow_remote_uninstall: bool,
 }
 impl AgentConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -221,7 +229,8 @@ impl AgentConfig {
             "Unsupported platform"
         );
         ensure!(
-            self.token.len() == 64 && self.token.bytes().all(|b| b.is_ascii_hexdigit()),
+            (self.token.len() == 64 && self.token.bytes().all(|b| b.is_ascii_hexdigit()))
+                || self.paired_master.is_some(),
             "Invalid endpoint token"
         );
         public_key(&self.public_key)?;
@@ -237,6 +246,19 @@ impl AgentConfig {
                 && origin.port_or_known_default() == Some(self.control.port()),
             "Portal must be an HTTPS origin with the control endpoint's port"
         );
+        if let Some(master) = self
+            .paired_master
+            .as_ref()
+            .or_else(|| self.pairing.as_ref().map(|p| &p.master))
+        {
+            master.validate()?;
+            ensure!(
+                master.origin == self.portal
+                    && master.control == self.control
+                    && master.policy_key == self.public_key,
+                "Enrollment master identity differs from endpoint configuration"
+            );
+        }
         self.quarantine().validate()
     }
     pub fn quarantine(&self) -> NetworkPolicy {
@@ -320,4 +342,52 @@ pub fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+pub const COMMAND_DOMAIN: &str = "wtp.endpoint.command.v1";
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteCommand {
+    pub id: u64,
+    pub endpoint_id: String,
+    pub principal_id: String,
+    pub node_hash: String,
+    pub kind: String,
+    pub issued_at: i64,
+    pub expires_at: i64,
+}
+impl RemoteCommand {
+    pub fn validate(
+        &self,
+        config: &AgentConfig,
+        credential: &wtp_control::Credential,
+        last: u64,
+        at: i64,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            config.allow_remote_uninstall && self.kind == "uninstall",
+            "Remote uninstall is not locally authorized"
+        );
+        ensure!(
+            self.id > last
+                && self.endpoint_id == config.endpoint_id
+                && self.principal_id == credential.principal_id
+                && self.node_hash == credential.node_hash,
+            "Wrong command target or replayed command"
+        );
+        ensure!(
+            self.issued_at <= at + 30
+                && self.expires_at > at
+                && self.expires_at > self.issued_at
+                && self.expires_at - self.issued_at <= 600,
+            "Expired or invalid remote command"
+        );
+        Ok(())
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlPolicy {
+    pub policy: Envelope,
+    pub command: Option<Envelope>,
 }

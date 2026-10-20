@@ -18,6 +18,9 @@ fn config(key: &SigningKey) -> AgentConfig {
         public_key: hex::encode(key.verifying_key().to_bytes()),
         interfaces: vec!["eth0".into()],
         dhcp: true,
+        pairing: None,
+        paired_master: None,
+        allow_remote_uninstall: false,
     }
 }
 fn policy() -> Policy {
@@ -29,6 +32,63 @@ fn policy() -> Policy {
         expires_at: 1300,
         network: network(),
     }
+}
+#[test]
+fn remote_removal_requires_local_opt_in_target_binding_freshness_and_new_sequence() {
+    let key = generate_key();
+    let mut config = config(&key);
+    let node = wtp_control::Node {
+        installation_id: "1".repeat(32),
+        platform: "linux".into(),
+        account_id: "0".into(),
+        hostname: "test".into(),
+        mac_addresses: vec![],
+    };
+    let master = wtp_control::Master {
+        id: "2".repeat(32),
+        name: "test".into(),
+        origin: config.portal.clone(),
+        control: config.control,
+        mac_addresses: vec![],
+        certificate_pem: "fixture".into(),
+        policy_key: config.public_key.clone(),
+    };
+    let credential = wtp_control::Credential {
+        principal_id: "3".repeat(32),
+        secret: "4".repeat(64),
+        node_hash: node.fingerprint(&master),
+        node,
+        master,
+        role: "agent".into(),
+        endpoint_id: Some(config.endpoint_id.clone()),
+        expires_at: now() + 1000,
+    };
+    let command = RemoteCommand {
+        id: 2,
+        endpoint_id: config.endpoint_id.clone(),
+        principal_id: credential.principal_id.clone(),
+        node_hash: credential.node_hash.clone(),
+        kind: "uninstall".into(),
+        issued_at: 1000,
+        expires_at: 1600,
+    };
+    assert!(command.validate(&config, &credential, 1, 1100).is_err());
+    config.allow_remote_uninstall = true;
+    assert!(command.validate(&config, &credential, 1, 1100).is_ok());
+    assert!(command.validate(&config, &credential, 2, 1100).is_err());
+    assert!(command.validate(&config, &credential, 1, 1600).is_err());
+    assert!(command.validate(&config, &credential, 1, 900).is_err());
+    for field in ["endpoint_id", "principal_id", "node_hash", "kind"] {
+        let mut value = serde_json::to_value(&command).unwrap();
+        value[field] = serde_json::Value::String("attacker-controlled".into());
+        let changed: RemoteCommand = serde_json::from_value(value).unwrap();
+        assert!(
+            changed.validate(&config, &credential, 1, 1100).is_err(),
+            "{field}"
+        );
+    }
+    let signed = sign(&command, COMMAND_DOMAIN, &key).unwrap();
+    assert!(verify::<RemoteCommand>(&signed, POLICY_DOMAIN, &key.verifying_key()).is_err());
 }
 #[test]
 fn signatures_bind_payload_domain_key_and_identity() {

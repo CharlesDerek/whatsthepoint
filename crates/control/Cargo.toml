@@ -1,0 +1,26 @@
+[package]
+name = "wtp-control"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.91"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+anyhow = "1"
+aes-gcm = "0.10"
+argon2 = "0.5"
+hex = "0.4"
+hmac = "0.12"
+hkdf = "0.12"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs", "prefer-post-quantum"] }
+rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

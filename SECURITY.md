@@ -1,6 +1,6 @@
 # Security model
 
-WTP 0.2 is new software without an independent security audit. The DNS service is designed for trusted local/LAN clients, and the management console is an administrative interface.
+WTP 0.3 is new software without an independent security audit. The DNS service is designed for trusted local/LAN clients, and the management console is an administrative interface.
 
 ## Trust boundaries
 
@@ -9,7 +9,7 @@ WTP 0.2 is new software without an independent security audit. The DNS service i
 - Explicit CIDR allowlists restrict who can ask the resolver questions. IPv4 and IPv6 need deliberate configuration. Do not expose DNS to the public internet.
 - Administrator access can change every policy. There is one administrator established by the CLI, without RBAC, SSO, or MFA. Browser profile enrollment creates scoped endpoint credentials, not additional administrators.
 - Feed downloads are restricted to built-in HTTPS presets, without redirects or arbitrary URL fetch endpoints. Feeds are size-bounded, strictly parsed, and replaced transactionally. HTTPS authenticates the source; feeds do not have independent content signatures.
-- The console binds loopback by default. Remote operation needs an HTTPS reverse proxy. Host and Origin checks, custom mutation headers, session CSRF tokens, CSP, SameSite cookies, and no CORS grants protect administrator browser boundaries. The separate `/agent/` routes accept bearer credentials and extension origins; administrator cookies cannot authorize them.
+- The console binds loopback by default. LAN operation uses native HTTPS; legacy browser-only operation may use an HTTPS reverse proxy over a loopback backend. Host and Origin checks, custom mutation headers, session CSRF tokens, CSP, SameSite cookies, and no CORS grants protect administrator browser boundaries. The separate `/agent/` routes accept bearer credentials and extension origins; administrator cookies cannot authorize them.
 - Passwords are stored with Argon2id and random salts. Sessions are random 256-bit tokens stored as SHA-256 hashes, expire after eight hours, and are revoked on logout or password reset.
 
 ## Resource limits and data
@@ -86,6 +86,28 @@ unverified in this Linux workspace. Independent security review is still require
 archive verification, Authenticode, Developer ID/notarization, and extension signing.
 No production keys, publisher identities, deployed update feed, or automatic
 privileged binary updater are supplied.
+
+## Paired control and remote removal
+
+The [paired control security model](docs/paired-control.md#principal-and-replay-protocol)
+describes the mandatory hybrid ML-KEM TLS suite, certificate pinning, single-use
+invitations, scope-limited principals, HMAC request/response binding, timestamp windows
+and durable nonce consumption. TLS 0-RTT and session resumption are disabled. MACs
+are public metadata, not authentication secrets. X.509 and Ed25519 signatures remain
+classical; no claim of complete post-quantum authentication or independent audit is made.
+
+Desktop token pools use password-derived Argon2id keys and AES-256-GCM. Unattended
+agent pools use a separate administrator-only key file; this is not hardware-backed
+storage. Server principal secrets are encrypted with `control-storage.key` outside
+the database. Theft of both defeats that protection. Protect backups and in-memory
+sessions. Revocation blocks subsequent requests, not already-dispatched operations.
+
+Remote uninstall is a fixed signed action bound to endpoint/principal/node, sequence
+and expiry, requiring opt-in in the locally protected agent config. It cannot run
+arbitrary server-supplied shell commands or paths. Completion is a self-reported
+receipt; a missing receipt or interrupted removal requires local verification.
+Linux runtime removal is container-tested; Windows/macOS native removal and trusted
+publisher signing still need platform acceptance tests.
 
 ## Reporting
 

@@ -9,6 +9,9 @@ pub struct Config {
     pub dns_bind: SocketAddr,
     pub http_bind: SocketAddr,
     pub public_origin: String,
+    pub tls_certificate: Option<std::path::PathBuf>,
+    pub tls_private_key: Option<std::path::PathBuf>,
+    pub master_name: String,
     pub allowed_clients: Vec<IpNet>,
     pub upstreams: Vec<Upstream>,
     pub cache_entries: usize,
@@ -31,6 +34,9 @@ impl Default for Config {
             dns_bind: "127.0.0.1:5354".parse().unwrap(),
             http_bind: "127.0.0.1:8080".parse().unwrap(),
             public_origin: "http://127.0.0.1:8080".into(),
+            tls_certificate: None,
+            tls_private_key: None,
+            master_name: "What’s the Point master".into(),
             allowed_clients: vec!["127.0.0.0/8".parse().unwrap(), "::1/128".parse().unwrap()],
             upstreams: vec![
                 Upstream {
@@ -80,6 +86,23 @@ impl Config {
                 || !matches!(origin.host_str(), Some("127.0.0.1" | "[::1]" | "localhost")))
         {
             bail!("remote administration requires an HTTPS public_origin and a TLS reverse proxy");
+        }
+        if self.tls_certificate.is_some() != self.tls_private_key.is_some() {
+            bail!("Configure both TLS certificate and private key");
+        }
+        if self.tls_certificate.is_some()
+            && (origin.scheme() != "https"
+                || origin.port_or_known_default() != Some(self.http_bind.port()))
+        {
+            bail!("Native TLS requires a matching HTTPS origin and port");
+        }
+        if self.tls_certificate.is_none() && !self.http_bind.ip().is_loopback() {
+            bail!(
+                "LAN console binding requires native TLS; reverse-proxy HTTP must remain on loopback"
+            );
+        }
+        if self.master_name.is_empty() || self.master_name.len() > 128 {
+            bail!("Master name must be 1–128 bytes");
         }
         if self.upstreams.is_empty() || self.upstreams.len() > 4 {
             bail!("configure between one and four HTTPS upstreams");

@@ -10,7 +10,7 @@ The agent uses existing kernel enforcement: nftables on Linux, Windows Defender
 Firewall on Windows, and PF on macOS. No custom kernel driver is required or shipped.
 The adapters, installers, signed policy protocol, portal controls, and signing tools
 are implemented. **Linux enforcement has been exercised against a real kernel in
-isolated containers. Windows/macOS code cross-checks pass; native firewall activation,
+isolated containers. Earlier Windows/macOS firewall-adapter cross-checks passed; the new control channel, native firewall activation,
 reboot behavior, and trusted publisher signing still need validation on those OSes.**
 Do not treat cross-compilation or a generated firewall plan as a deployment test.
 
@@ -48,8 +48,11 @@ management IP:port, physical interfaces, and bootstrap DHCP setting. The server
 stores only the endpoint token's hash; it never returns the token in device lists.
 An endpoint token cannot administer the portal or act as a browser profile token.
 
-The agent validates TLS using the OS CA store and connects to the pinned management
-IP using curl's resolver override, so quarantine does not depend on DNS. Credentials
+Native-TLS enrollments use pinned hybrid post-quantum TLS and single-use pairing,
+then HMAC-authenticated requests with durable replay protection. See [paired agent
+control and remote removal](paired-control.md). Legacy enrollments validate TLS using
+the OS CA store and connect to the pinned management IP using curl's resolver
+override, so quarantine does not depend on DNS. Credentials
 are supplied through curl's stdin, not command-line arguments. Redirects and proxy
 environment variables are disabled. Policy signatures bind the endpoint ID, OS,
 revision, timestamps, and network policy in a distinct signature domain. The agent
@@ -59,7 +62,7 @@ reused revisions with different network contents, and clock rollback beyond its
 protected. A process lock prevents two agents from sharing one state directory.
 
 The portal issues five-minute policies. The supervisor polls about every 30 seconds
-and checks firewall drift about every two seconds. A request may take up to ten
+and checks firewall drift about every two seconds. A request may take up to fifteen
 seconds, delaying the next check; these are polling intervals, not hard real-time
 guarantees. It retains a verified cached policy while offline until expiry, then
 allows only the management connection and infrastructure exceptions. The same
@@ -76,12 +79,14 @@ are the rules being enforced. Refresh the endpoint page to see current reports.
 
 ## Enrollment and preflight
 
-1. Configure the portal behind HTTPS and set its exact `public_origin`.
+1. Configure [native LAN HTTPS](paired-control.md) for paired agents. A legacy
+   HTTPS reverse proxy still supports older bearer-token enrollments.
 2. In **Endpoints → Enroll an endpoint**, enter the OS, management server IP:port,
    physical interface names, approved DNS IPs, and approved TCP/UDP destinations.
    The portal always retains the management connection. Interface changes require
    local administrator re-enrollment, because they are pinned in the config.
-3. Download the enrollment JSON once and transfer it securely. Browser profile
+3. Download the enrollment JSON once and transfer it securely. Native-TLS
+   invitations must be installed within ten minutes. Browser profile
    enrollment is separate. The endpoint file contains a private credential; keep it
    out of tickets, source control, and shared folders. Lost endpoint credentials
    require a new enrollment; the old endpoint can be quarantined.
@@ -187,6 +192,14 @@ Rollback stops launchd, flushes only the WTP anchor, removes its exact parent
 registration while preserving unrelated config edits, and reloads validated PF
 configuration. PF remains enabled so other protections are not silently disabled.
 The original config and enrollment state remain available for recovery.
+
+## Remote removal
+
+Native-TLS paired agents support a fixed signed uninstall operation when the local
+installer authorizes `allow_remote_uninstall`. The portal can request removal after
+the agent reports that opt-in. See [authorization, receipts and recovery](paired-control.md#paired-agents-and-remote-removal).
+The Linux service allows writes to its protected config, state, binary and unit
+directories so it can erase enrollment secrets and remove its fixed installed files.
 
 ## Release and extension signing
 

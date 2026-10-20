@@ -354,6 +354,8 @@ fn configuration_rejects_unsafe_or_unknown_values() {
     };
     assert!(config.validate().is_err());
     config.public_origin = "https://filter.example.com".into();
+    assert!(config.validate().is_err()); // A URL alone does not encrypt the listener.
+    config.http_bind = "127.0.0.1:8080".parse().unwrap();
     assert!(config.validate().is_ok());
     config.upstreams[0].url = "http://dns.example.com/dns-query".into();
     assert!(config.validate().is_err());
@@ -807,6 +809,7 @@ async fn endpoint_enrollment_signed_updates_quarantine_and_token_isolation() {
             checked_at: whatsthepoint::now(),
             detail: "Signed policy applied".into(),
             fingerprint: "0".repeat(64),
+            remote_uninstall: false,
         };
         let response = router
             .clone()

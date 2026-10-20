@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use sqlx::FromRow;
 use std::net::SocketAddr;
 
-pub struct ApiError(pub(crate) StatusCode, pub(crate) String);
+pub struct ApiError(pub StatusCode, pub String);
 type Result<T> = std::result::Result<T, ApiError>;
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -46,7 +46,7 @@ fn unauthorized() -> ApiError {
 #[derive(Clone, FromRow)]
 pub(crate) struct Session {
     pub(crate) username: String,
-    csrf: String,
+    pub(crate) csrf: String,
 }
 
 pub fn router(app: App) -> Router {
@@ -104,6 +104,7 @@ pub fn router(app: App) -> Router {
         .route("/api/settings", get(settings))
         .merge(crate::browser_api::routes())
         .merge(crate::endpoint_api::routes())
+        .merge(crate::control_api::routes())
         .layer(DefaultBodyLimit::max(feeds::MAX_LIST_BYTES + 1024))
         .layer(middleware::from_fn_with_state(app.clone(), gate))
         .with_state(app)
@@ -167,16 +168,29 @@ async fn gate(State(app): State<App>, mut request: Request, next: Next) -> Respo
             ));
         }
         if request.uri().path().starts_with("/api/") && request.uri().path() != "/api/login" {
-            let token = cookie_token(request.headers()).ok_or_else(unauthorized)?;
-            let session = sqlx::query_as::<_, Session>(
-                "SELECT username, csrf FROM sessions WHERE token_hash = ? AND expires_at > ?",
-            )
-            .bind(auth::digest(token))
-            .bind(crate::now())
-            .fetch_optional(&app.db)
-            .await?
-            .ok_or_else(unauthorized)?;
+            let control = request
+                .extensions()
+                .get::<crate::control_api::ConsoleSession>()
+                .cloned();
+            let session = if let Some(control) = &control {
+                Session {
+                    username: control.username.clone(),
+                    csrf: String::new(),
+                }
+            } else {
+                let token = cookie_token(request.headers()).ok_or_else(unauthorized)?;
+
+                sqlx::query_as::<_, Session>(
+                    "SELECT username, csrf FROM sessions WHERE token_hash = ? AND expires_at > ?",
+                )
+                .bind(auth::digest(token))
+                .bind(crate::now())
+                .fetch_optional(&app.db)
+                .await?
+                .ok_or_else(unauthorized)?
+            };
             if mutation
+                && control.is_none()
                 && request
                     .headers()
                     .get("x-csrf-token")

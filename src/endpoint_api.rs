@@ -28,6 +28,7 @@ struct Endpoint {
     reported_revision: i64,
     reported_state: String,
     detail: String,
+    remote_uninstall_enabled: bool,
 }
 pub fn routes() -> Router<App> {
     Router::new()
@@ -41,7 +42,7 @@ async fn list(State(app): State<App>) -> Result<Json<Value>> {
         .fetch_all(&app.db)
         .await?;
     Ok(Json(
-        json!({"public_key":hex::encode(app.endpoint_key.verifying_key().to_bytes()),"devices":devices}),
+        json!({"public_key":hex::encode(app.endpoint_key.verifying_key().to_bytes()),"devices":devices,"master_control":app.master.as_ref().map(|m|m.control.to_string())}),
     ))
 }
 #[derive(Deserialize)]
@@ -51,6 +52,8 @@ struct Enrollment {
     platform: String,
     control: SocketAddr,
     network: NetworkPolicy,
+    #[serde(default)]
+    allow_remote_uninstall: bool,
 }
 async fn enroll(
     State(app): State<App>,
@@ -61,9 +64,16 @@ async fn enroll(
         return Err(bad("Enter an endpoint name up to 80 characters"));
     }
     input.network.validate().map_err(|e| bad(e.to_string()))?;
+    if app
+        .master
+        .as_ref()
+        .is_some_and(|m| m.control != input.control)
+    {
+        return Err(bad("Management address must match the paired master"));
+    }
     let id = auth::token()[..32].to_owned();
     let token = auth::token();
-    let config = AgentConfig {
+    let mut config = AgentConfig {
         endpoint_id: id.clone(),
         platform: input.platform.clone(),
         portal: app.config.public_origin.clone(),
@@ -72,6 +82,9 @@ async fn enroll(
         public_key: hex::encode(app.endpoint_key.verifying_key().to_bytes()),
         interfaces: input.network.interfaces.clone(),
         dhcp: input.network.dhcp,
+        pairing: None,
+        paired_master: None,
+        allow_remote_uninstall: input.allow_remote_uninstall,
     };
     config.validate().map_err(|e| {
         bad(format!(
@@ -99,6 +112,12 @@ async fn enroll(
         &format!("{id}: {}", input.name),
     )
     .await?;
+    if app.master.is_some() {
+        config.pairing = Some(
+            crate::control_api::issue(&app, &session.username, &input.name, "agent", Some(&id))
+                .await?,
+        );
+    }
     let policy = Policy {
         endpoint_id: id,
         platform: input.platform,
@@ -188,6 +207,16 @@ async fn fetch(
         .fetch_optional(&app.db)
         .await?
         .ok_or_else(unauthorized)?;
+    let paired: i64 = sqlx::query_scalar("SELECT count(*) FROM principals WHERE endpoint_id=?")
+        .bind(&endpoint.id)
+        .fetch_one(&app.db)
+        .await?;
+    if paired > 0 {
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "This endpoint requires its paired control credential".into(),
+        ));
+    }
     if status.revision > i64::MAX as u64
         || status.detail.len() > 512
         || status.state.len() > 64
@@ -225,4 +254,75 @@ async fn fetch(
         POLICY_DOMAIN,
         &app.endpoint_key
     )?)))
+}
+
+pub(crate) async fn paired_policy(
+    app: &App,
+    id: &str,
+    principal: &str,
+    node_hash: &str,
+    status: wtp_endpoint::runtime::Status,
+) -> Result<Value> {
+    let endpoint = sqlx::query_as::<_, Endpoint>("SELECT * FROM endpoints WHERE id=?")
+        .bind(id)
+        .fetch_optional(&app.db)
+        .await?
+        .ok_or_else(|| bad("Endpoint not found"))?;
+    if status.revision > i64::MAX as u64
+        || status.detail.len() > 512
+        || status.state.len() > 64
+        || status.fingerprint.len() > 128
+    {
+        return Err(bad("Invalid agent report"));
+    }
+    sqlx::query("UPDATE endpoints SET last_seen=?,reported_revision=?,reported_state=?,detail=?,remote_uninstall_enabled=? WHERE id=?").bind(crate::now()).bind(status.revision as i64).bind(&status.state).bind(&status.detail).bind(status.remote_uninstall).bind(id).execute(&app.db).await?;
+    let network: NetworkPolicy =
+        serde_json::from_str(&endpoint.network).map_err(anyhow::Error::from)?;
+    let network = if endpoint.quarantined {
+        network.quarantine(endpoint.control.parse().map_err(anyhow::Error::from)?)
+    } else {
+        network
+    };
+    let policy = Policy {
+        endpoint_id: id.into(),
+        platform: endpoint.platform,
+        revision: endpoint.revision as u64,
+        issued_at: crate::now(),
+        expires_at: crate::now() + 300,
+        network,
+    };
+    #[derive(FromRow)]
+    struct Command {
+        id: i64,
+        kind: String,
+        created_at: i64,
+        expires_at: i64,
+    }
+    let pending=sqlx::query_as::<_,Command>("SELECT * FROM endpoint_commands WHERE endpoint_id=? AND principal_id=? AND node_hash=? AND state IN ('queued','delivered') AND expires_at>? ORDER BY id LIMIT 1").bind(id).bind(principal).bind(node_hash).bind(crate::now()).fetch_optional(&app.db).await?;
+    let command = if let Some(command) = pending {
+        let value = wtp_endpoint::RemoteCommand {
+            id: command.id as u64,
+            endpoint_id: id.into(),
+            principal_id: principal.into(),
+            node_hash: node_hash.into(),
+            kind: command.kind,
+            issued_at: command.created_at,
+            expires_at: command.expires_at,
+        };
+        sqlx::query("UPDATE endpoint_commands SET state='delivered' WHERE id=? AND state='queued'")
+            .bind(command.id)
+            .execute(&app.db)
+            .await?;
+        Some(wtp_endpoint::sign(
+            &value,
+            wtp_endpoint::COMMAND_DOMAIN,
+            &app.endpoint_key,
+        )?)
+    } else {
+        None
+    };
+    Ok(json!(wtp_endpoint::ControlPolicy {
+        policy: wtp_endpoint::sign(&policy, POLICY_DOMAIN, &app.endpoint_key)?,
+        command
+    }))
 }

@@ -27,11 +27,11 @@ const time = value => new Date(value * 1000).toLocaleTimeString([], {hour:'2-dig
 const badge = (value, label = value) => `<span class="badge ${esc(value)}">${value === 'allowed' || value === 'allow' ? '↗' : value === 'blocked' || value === 'block' ? '⊘' : '·'} ${esc(label)}</span>`;
 const empty = (message, name='shield') => `<div class="empty">${icon(name)}${esc(message)}</div>`;
 const button = (action, label, name, cls='', extra='') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${name ? icon(name) : ''}${label}</button>`;
-const views = {overview:['Overview','grid'],queries:['Query log','activity'],rules:['Your rules','shield'],lists:['Blocklists','list'],clients:['Clients','devices'],browser:['Browser protection','shield'],endpoints:['Endpoints','devices'],settings:['Settings','settings']};
+const views = {overview:['Overview','grid'],queries:['Query log','activity'],rules:['Your rules','shield'],lists:['Blocklists','list'],clients:['Clients','devices'],browser:['Browser protection','shield'],endpoints:['Endpoints','devices'],pairing:['Paired consoles','devices'],settings:['Settings','settings']};
 const root = document.querySelector('#root');
 const modal = document.querySelector('#modal');
 let session = null, currentView = 'overview', requestId = 0, toastTimer;
-let browserData, endpointData, endpointEnrollment;
+let browserData, endpointData, endpointEnrollment, pairingData, pairingInvitation;
 let queryFilter = {search:'',decision:'',before:''}, queryRows = [], loadedRules = [];
 
 async function api(path, method='GET', data) {
@@ -75,7 +75,7 @@ function shell() {
     <div class="brand"><img src="/favicon.svg" alt=""><div>what’s the point<small>LESS NOISE. MORE INTERNET.</small></div></div>
     <div class="nav-label">WORKSPACE</div><nav aria-label="Main navigation">${Object.entries(views).map(([key,[label,img]])=>`<button type="button" data-view="${key}">${icon(img)}${label}<span class="nav-dot" hidden></span></button>`).join('')}</nav>
     <div class="sidebar-foot"><div class="engine-card"><strong><span class="dot"></span>Rust under the hood.</strong><small>Open source. On your terms.</small></div>
-    <div class="user"><div class="avatar">${esc(session.username[0]?.toUpperCase() || 'A')}</div><div><strong>${esc(session.username)}</strong><small>Administrator</small></div>${button('logout','', 'logout','', 'aria-label="Sign out" title="Sign out"')}</div></div>
+    <div class="user"><div class="avatar">${esc(session.username[0]?.toUpperCase() || 'A')}</div><div><strong>${esc(session.username)}</strong><small>Administrator</small></div>${session.desktop?button('desktop-switch','Masters','devices','text-button'):''}${button('logout','', 'logout','', 'aria-label="Sign out" title="Sign out"')}</div></div>
     </aside><main class="main"><header class="topbar"><div class="breadcrumb">Workspace <span>/</span><b id="crumb">Overview</b></div><span class="mobile-brand">what’s the point</span><div class="top-status"><a href="https://github.com/CharlesDerek/whatsthepoint" target="_blank" rel="noreferrer">Open source ↗</a><span id="connection"><span class="dot"></span>Console connected</span></div></header>
     <div class="content"><div id="page"></div><footer class="footer"><span>Built with Rust. <strong>Run by you.</strong></span><span>One point closer to a less annoying internet.</span></footer></div></main></div>`;
 }
@@ -170,6 +170,7 @@ const renderers = {
     browserData = await api('/browser');
     return renderBrowser(browserData);
   },
+  async pairing() { pairingData=await api('/principals'); return renderPairing(pairingData); },
   async settings() {
     const [s,audit] = await Promise.all([api('/settings'),api('/audit')]), c=s.config;
     const row=(a,b)=>`<div class="detail-row"><span>${a}</span><b>${esc(b)}</b></div>`;
@@ -207,6 +208,15 @@ document.addEventListener('click', async event=>{
   const action=el.dataset.action;
   try {
     switch(action) {
+      case 'pair-console': openModal('Pair a desktop console',`<form id="pairing-form" class="form-stack"><label>Console name<input name="name" required maxlength="80" placeholder="Alex · admin desktop"></label><p>A paired console can administer this portal. Its invitation is single-use and expires after ten minutes.</p><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">Create pairing invitation</button></form>`); break;
+      case 'pairing-export': if(pairingInvitation){downloadJson('desktop-pairing.json',pairingInvitation);pairingInvitation=null;modal.close();} break;
+      case 'principal-revoke': await confirmAction('Revoke this paired credential?', 'This stops future authenticated requests from the selected desktop or agent. An agent with an expired policy will quarantine.',()=>api(`/principals/${el.dataset.id}/revoke`,'POST')); break;
+      case 'desktop-switch': location.assign('/desktop'); break;
+      case 'endpoint-uninstall': {
+        const endpoint=endpointData.devices.find(d=>d.id===el.dataset.id);
+        await confirmAction('Uninstall this endpoint agent?',`Request removal from ${endpoint.name}. The agent will restore its firewall, disable startup, and remove its managed credentials and executable. Protection on that endpoint will end.`,()=>api(`/endpoints/${endpoint.id}/uninstall`,'POST',{revision:endpoint.revision}),()=>toast('Uninstall queued. Track its receipt in Paired consoles.'));
+        break;
+      }
       case 'endpoint-enroll': endpointModal(); break;
       case 'endpoint-edit': endpointModal(el.dataset.id); break;
       case 'endpoint-export': downloadEndpoint(); break;
@@ -225,7 +235,7 @@ document.addEventListener('click', async event=>{
       case 'browser-delete-category': await saveBrowserPolicy({...browserData.policy,categories:browserData.policy.categories.filter(c=>c.id!==el.dataset.id)}); break;
       case 'close-modal': modal.close(); break;
       case 'reload': await navigate(currentView); break;
-      case 'logout': await api('/logout','POST'); session=null; showLogin(); break;
+      case 'logout': if(session?.desktop){await fetch('/desktop/lock',{method:'POST',headers:{'X-WTP-Request':'1'}});location.assign('/desktop');}else{await api('/logout','POST');session=null;showLogin();}break;
       case 'go-lists': await navigate('lists'); break;
       case 'go-queries': queryFilter.before=''; await navigate('queries'); break;
       case 'add-rule': ruleModal(); break;
@@ -270,6 +280,7 @@ document.addEventListener('submit',async event=>{
   submit.disabled=true;
   try {
     switch(form.getAttribute('id')) {
+      case 'pairing-form': pairingInvitation=await api('/pairing','POST',{name:data.name});modal.close();await navigate('pairing');openModal('Save desktop pairing invitation',`<p>Open the desktop console, choose this invitation file, and set or enter its local vault passphrase. Transfer this file securely; it authorizes administrator access once.</p>${button('pairing-export','Download pairing invitation','devices','primary')}`);break;
       case 'endpoint-form': await saveEndpoint(data); break;
       case 'browser-profile-form': await enrollBrowser(data); break;
       case 'browser-rule-form': await saveBrowserRule(data); break;
@@ -356,19 +367,20 @@ function browserPreviewModal() {
 function renderEndpoints({devices,public_key}) {
   return head('Control the whole desktop.', 'Publish signed network policies to privileged endpoint agents.', button('reload','Refresh','refresh')+button('endpoint-enroll','Enroll an endpoint','plus','primary'))
   + `<div class="notice">Endpoint rules allow only approved IP addresses, ports, and physical interfaces. Add your management server and an approved web gateway before activation. Browser profiles control page access separately. An expired policy puts the endpoint into management-only quarantine.</div>
-  <section class="panel"><div class="panel-head"><div><h2>Managed endpoints</h2><p>Status is reported by each agent. A recent report is not hardware attestation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Published policy</th><th>Agent report</th><th>Last seen</th><th>Manage</th></tr></thead><tbody>${devices.map(d=>`<tr><td>${esc(d.name)}<br><small>${esc(d.platform)} · ${esc(d.control)}</small></td><td>Revision ${d.revision}<br>${d.quarantined?'Quarantine':'Approved connections'}</td><td>${!d.last_seen?'Not enrolled':Date.now()/1000-d.last_seen>90?'Offline / stale':esc(d.reported_state)}<br><small>Reported revision ${d.reported_revision} · ${esc(d.detail)}</small></td><td>${date(d.last_seen)}</td><td class="browser-actions">${button('endpoint-edit','Edit policy',null,'text-button',`data-id="${d.id}"`)}${button('endpoint-quarantine',d.quarantined?'Restore':'Quarantine',null,'text-button',`data-id="${d.id}"`)}</td></tr>`).join('') || '<tr><td colspan="5">No endpoints enrolled. Create a policy and install its agent with administrator access.</td></tr>'}</tbody></table></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Managed endpoints</h2><p>Status is reported by each agent. A recent report is not hardware attestation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Published policy</th><th>Agent report</th><th>Last seen</th><th>Manage</th></tr></thead><tbody>${devices.map(d=>`<tr><td>${esc(d.name)}<br><small>${esc(d.platform)} · ${esc(d.control)}</small></td><td>Revision ${d.revision}<br>${d.quarantined?'Quarantine':'Approved connections'}</td><td>${!d.last_seen?'Not enrolled':Date.now()/1000-d.last_seen>90?'Offline / stale':esc(d.reported_state)}<br><small>Reported revision ${d.reported_revision} · ${esc(d.detail)}</small></td><td>${date(d.last_seen)}</td><td class="browser-actions">${button('endpoint-edit','Edit policy',null,'text-button',`data-id="${d.id}"`)}${button('endpoint-quarantine',d.quarantined?'Restore':'Quarantine',null,'text-button',`data-id="${d.id}"`)}${d.remote_uninstall_enabled?button('endpoint-uninstall','Uninstall agent',null,'text-button danger',`data-id="${d.id}"`):''}</td></tr>`).join('') || '<tr><td colspan="5">No endpoints enrolled. Create a policy and install its agent with administrator access.</td></tr>'}</tbody></table></div></section>
   <section class="panel"><div class="panel-head"><div><h2>Policy verification key</h2><p>The enrollment file pins this portal’s Ed25519 public key.</p><code class="endpoint-key">${esc(public_key)}</code></div></div></section>`;
 }
 function endpointModal(id) {
   const d=endpointData.devices.find(d=>d.id===id);
   const n=d?JSON.parse(d.network):{interfaces:[],dns_servers:[],allowed_tcp:[],allowed_udp:[],dhcp:true};
   openModal(d?'Edit endpoint policy':'Enroll an endpoint',`<form id="endpoint-form" class="form-stack"><input type="hidden" name="id" value="${id || ''}"><input type="hidden" name="revision" value="${d?.revision || 0}">
-  ${d?`<p>Publishing a revision for ${esc(d.name)}. Changes arrive at the next agent refresh.</p>`:`<label>Endpoint name<input name="name" required maxlength="80" placeholder="Alex · managed laptop"></label><label>Operating system<select name="platform"><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select></label><label>Management server IP:port<input name="control" required placeholder="192.0.2.10:443"></label>`}
+  ${d?`<p>Publishing a revision for ${esc(d.name)}. Changes arrive at the next agent refresh.</p>`:`<label>Endpoint name<input name="name" required maxlength="80" placeholder="Alex · managed laptop"></label><label>Operating system<select name="platform"><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select></label><label>Management server IP:port<input name="control" required value="${esc(endpointData?.master_control || '')}" placeholder="192.0.2.10:443"></label>`}
   <label>Approved physical interfaces <small>One per line; fixed at enrollment</small><textarea name="interfaces" rows="2" required ${d?'readonly':''} placeholder="eth0, Ethernet, or en0 — one actual interface per line">${esc(n.interfaces.join('\n'))}</textarea></label>
   <label>Approved DNS server IPs <small>One per line</small><textarea name="dns_servers" rows="2">${esc(n.dns_servers.join('\n'))}</textarea></label>
   <label>Approved TCP destinations <small>One IP:port per line; IPv6 uses [address]:port</small><textarea name="allowed_tcp" rows="4" placeholder="192.0.2.20:443">${esc(n.allowed_tcp.join('\n'))}</textarea></label>
   <label>Approved UDP destinations <small>DNS uses the resolver list above</small><textarea name="allowed_udp" rows="2">${esc(n.allowed_udp.join('\n'))}</textarea></label>
   <label>Address configuration<select name="dhcp"><option value="true" ${n.dhcp?'selected':''}>Allow DHCP</option><option value="false" ${n.dhcp?'':'selected'}>Static address only</option></select></label>
+  ${d?'':`<label>Remote removal<select name="allow_remote_uninstall"><option value="false">Local uninstall only</option><option value="true">Allow this portal to uninstall the installed agent</option></select></label>`}
   <p class="small">The management destination is always retained. All other connections are blocked. Use a console or recovery channel for first activation.</p><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">${d?'Publish policy':'Create enrollment file'}</button></form>`);
 }
 async function saveEndpoint(data) {
@@ -381,7 +393,7 @@ async function saveEndpoint(data) {
     await api(`/endpoints/${d.id}`,'POST',{revision:Number(data.revision),network,quarantined:d.quarantined});
     modal.close();await navigate('endpoints');toast('Signed policy published. Check the agent’s reported revision.');
   } else {
-    const result=await api('/endpoints','POST',{name:data.name,platform:data.platform,control,network});
+    const result=await api('/endpoints','POST',{name:data.name,platform:data.platform,control,network,allow_remote_uninstall:data.allow_remote_uninstall==='true'});
     endpointEnrollment=result.config;
     modal.close();await navigate('endpoints');
     openModal('Save endpoint enrollment',`<p>Download this file once and transfer it securely to the endpoint administrator. It contains a private device credential and the pinned policy key.</p><p>Install the matching agent with the instructions in <code>docs/endpoint-enforcement.md</code>. Installation requires administrator access and changes the device firewall.</p>${button('endpoint-export','Download enrollment JSON','devices','primary')}`);
@@ -392,4 +404,12 @@ function downloadEndpoint() {
   const url=URL.createObjectURL(new Blob([JSON.stringify(endpointEnrollment,null,2)],{type:'application/json'}));
   const a=document.createElement('a');a.href=url;a.download='endpoint-config.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   endpointEnrollment=null;modal.close();
+}
+
+function downloadJson(name,value){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function renderPairing({master,master_hash,principals,commands}){
+  return head('Your consoles. Your trusted nodes.','Pair desktops and agents with this master, review their identities, and revoke access.',button('reload','Refresh','refresh')+(master?button('pair-console','Pair a desktop console','plus','primary'):''))
+  + (master?`<section class="panel"><div class="panel-head"><div><h2>${esc(master.name)}</h2><p>${esc(master.origin)} · Hybrid post-quantum TLS 1.3</p><code class="endpoint-key">${esc(master_hash)}</code><p class="small">Master fingerprint includes its pinned certificate, policy key, identity, address, and network adapter metadata. MAC addresses provide identity context; they are not authentication secrets.</p></div></div></section>`:'<div class="notice">Enable the native HTTPS listener to pair desktop consoles and agents. Run <code>wtp lan-init</code> with this server’s LAN address and start it with the generated configuration.</div>')
+  + `<section class="panel"><div class="panel-head"><div><h2>Paired principals</h2><p>Invitations are single-use. Saved desktop credentials are encrypted locally; each control request uses a fresh authenticated nonce.</p></div></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Device binding</th><th>Last seen / expiry</th><th>Status</th></tr></thead><tbody>${principals.map(p=>{const node=JSON.parse(p.node);return `<tr><td>${esc(p.name)}</td><td>${esc(p.role)}</td><td>${esc(node.platform)} · ${esc(node.account_id)}<br><small class="endpoint-key">${esc(p.node_hash)}</small></td><td>${date(p.last_seen)}<br><small>Expires ${date(p.expires_at)}</small></td><td>${p.revoked?'Revoked':button('principal-revoke','Revoke',null,'text-button danger',`data-id="${p.id}"`)}</td></tr>`;}).join('') || '<tr><td colspan="5">No paired desktops or endpoint agents yet.</td></tr>'}</tbody></table></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Remote agent removal</h2><p>Only agents installed with remote uninstall enabled can act on these requests. A queued or acknowledged request does not confirm removal.</p></div></div><div class="table-wrap"><table><thead><tr><th>Command</th><th>Endpoint</th><th>State</th><th>Detail</th><th>Expiry</th></tr></thead><tbody>${commands.map(c=>`<tr><td>${c.id} · ${esc(c.kind)}</td><td class="mono">${esc(c.endpoint_id)}</td><td>${esc(['queued','delivered'].includes(c.state)&&c.expires_at<Date.now()/1000?'expired':c.state)}</td><td>${esc(c.detail)}</td><td>${date(c.expires_at)}</td></tr>`).join('') || '<tr><td colspan="5">No remote uninstall commands issued.</td></tr>'}</tbody></table></div></section>`;
 }

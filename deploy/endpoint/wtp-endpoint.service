@@ -22,7 +22,7 @@ PrivateTmp=true
 ProtectControlGroups=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
-ReadWritePaths=/var/lib/wtp-endpoint
+ReadWritePaths=/var/lib/wtp-endpoint /etc/wtp-endpoint /usr/local/libexec/wtp /etc/systemd/system
 UMask=0077
 
 [Install]
