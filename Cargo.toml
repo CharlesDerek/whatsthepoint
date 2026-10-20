@@ -22,7 +22,7 @@ hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
 tower = { version = "0.5", features = ["util"] }
 wtp-endpoint = { path = "crates/endpoint" }
 anyhow = "1"
-argon2 = "0.5"
+argon2 = "0.6"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 hex = "0.4"
