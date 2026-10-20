@@ -4,3 +4,11 @@ svg{width:18px;height:18px;flex-shrink:0}.period{display:inline-flex;align-items
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
 #toast{visibility:hidden}#toast.show{visibility:visible}
+
+.browser-verdict { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font-size: 12px; }
+
+.browser-actions .text-button { margin-right: 12px; padding: 8px 0; }
+#browser-default-form { padding: 16px 24px; margin: 0; align-items: center; }
+#browser-default-form label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.endpoint-key { overflow-wrap: anywhere; }

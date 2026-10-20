@@ -28,3 +28,15 @@ Thumbs.db
 **/.aider*
 **/.copilot*
 **/copilot-instructions.md
+
+# Browser-generated rule caches and private deployment material.
+/extension/_metadata/
+*.pfx
+*.p12
+*.key
+*.pem
+/endpoint-config.json
+
+/signed-dist/
+__pycache__/
+*.pyc

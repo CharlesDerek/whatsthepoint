@@ -143,14 +143,18 @@ wtp --data-dir /path/to/data reset-password --username admin
 
 This revokes existing sessions. Automation may supply `WTP_ADMIN_PASSWORD` through an environment secret; do not put passwords in shell arguments or commit them.
 
-## Enforcement boundaries
+## DNS enforcement boundaries
 
 - A browser using its own DoH resolver can bypass system DNS. Managed browsers need enterprise DNS policy.
 - A device owner can use a VPN, an alternate resolver, a proxy, or a direct IP.
 - Network enforcement needs firewall rules for external DNS/DoT and controls for browser DoH; blocking port 53 alone is insufficient.
-- A gateway may hide clients behind its own IP. There is no per-user identity or fleet enrollment.
-- Domain filtering cannot distinguish two URL paths on the same hostname or reliably remove ads served from the same domain as desired content.
-- The filter's NXDOMAIN response cannot render a friendly block page inside HTTPS connections.
+- A gateway may hide DNS clients behind its own IP. Browser enrollment and native OS account binding are separate; see [browser protection](browser-protection.md).
+- DNS domain filtering cannot distinguish paths. The browser extension adds URL path rules and content categories; it does not rewrite arbitrary interactive sites to remove every ad.
+- DNS NXDOMAIN cannot render a block page inside HTTPS connections. The extension uses its own navigation check/block page.
 - The resolver does not implement DNS64, split DNS, local authoritative zones, DNSSEC validation of its own, TLS interception, or independent CNAME lookups.
 
 Deploy alongside managed endpoint/network controls when tamper resistance matters. Do not describe this release as tamper-proof.
+
+## Privileged endpoint controls
+
+The DNS service setup above is separate from the device-wide firewall agent. Follow [endpoint enrollment, activation, validation, and rollback](endpoint-enforcement.md) for Linux/systemd, Windows/SYSTEM, and macOS/launchd. Review [release verification and signing](release-signing.md) before installing privileged binaries.

@@ -1,0 +1,1 @@
+{"type":"object","properties":{"portal":{"title":"Portal origin","type":"string"},"token":{"title":"Per-OS-account profile token","type":"string"},"requireNative":{"title":"Require the native identity host","type":"boolean"}}}

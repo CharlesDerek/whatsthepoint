@@ -27,10 +27,11 @@ const time = value => new Date(value * 1000).toLocaleTimeString([], {hour:'2-dig
 const badge = (value, label = value) => `<span class="badge ${esc(value)}">${value === 'allowed' || value === 'allow' ? '↗' : value === 'blocked' || value === 'block' ? '⊘' : '·'} ${esc(label)}</span>`;
 const empty = (message, name='shield') => `<div class="empty">${icon(name)}${esc(message)}</div>`;
 const button = (action, label, name, cls='', extra='') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${name ? icon(name) : ''}${label}</button>`;
-const views = {overview:['Overview','grid'],queries:['Query log','activity'],rules:['Your rules','shield'],lists:['Blocklists','list'],clients:['Clients','devices'],settings:['Settings','settings']};
+const views = {overview:['Overview','grid'],queries:['Query log','activity'],rules:['Your rules','shield'],lists:['Blocklists','list'],clients:['Clients','devices'],browser:['Browser protection','shield'],endpoints:['Endpoints','devices'],settings:['Settings','settings']};
 const root = document.querySelector('#root');
 const modal = document.querySelector('#modal');
 let session = null, currentView = 'overview', requestId = 0, toastTimer;
+let browserData, endpointData, endpointEnrollment;
 let queryFilter = {search:'',decision:'',before:''}, queryRows = [], loadedRules = [];
 
 async function api(path, method='GET', data) {
@@ -60,7 +61,7 @@ function showLogin() {
     <section class="login-story"><div class="brand"><img src="/favicon.svg" alt="">what’s the point<small> </small></div>
       <div><div class="login-motif"><div class="motif-node">${icon('globe')}</div><span class="motif-line"></span><div class="motif-node main-node">${icon('shield')}</div><span class="motif-line"></span><div class="motif-node">${icon('devices')}</div></div>
       <h1>Your network.<br>Your rules.<br><em>That’s the point.</em></h1><p>A little less noise. A lot more control. Open source web filtering, built in Rust and made to stay out of your way.</p></div>
-      <span class="small">No browser extension. No mystery subscription. Just a point.</span>
+      <span class="small">DNS protection. Browser policies. One portal.</span>
     </section>
     <section class="login-form"><div class="login-box"><div class="eyebrow">THE NETWORK CONSOLE</div><h2>Welcome back.</h2><p>Your corner of the internet is waiting.</p>
       <form id="login-form" class="form-stack"><label>Username<input name="username" autocomplete="username" required maxlength="64" autofocus placeholder="admin"></label>
@@ -161,6 +162,14 @@ const renderers = {
     return head('Who’s on your network?','Clients seen by this resolver in the last 24 hours.',button('reload','Refresh','refresh'))
     + `<div class="notice">Clients are identified by source IP. A router that proxies DNS may appear as a single client. All clients use the same policy in this release.</div><section class="panel">${clients.length?`<div class="table-wrap"><table><thead><tr><th>Client IP</th><th>Total queries</th><th>Blocked</th><th>Last seen</th></tr></thead><tbody>${clients.map(c=>`<tr><td class="mono">${esc(c.ip)}</td><td>${num(c.total)}</td><td>${num(c.blocked)}</td><td>${date(c.last_seen)}</td></tr>`).join('')}</tbody></table></div>`:empty('No clients yet. Configure your device’s DNS to start.','devices')}</section>`;
   },
+  async endpoints() {
+    endpointData = await api('/endpoints');
+    return renderEndpoints(endpointData);
+  },
+  async browser() {
+    browserData = await api('/browser');
+    return renderBrowser(browserData);
+  },
   async settings() {
     const [s,audit] = await Promise.all([api('/settings'),api('/audit')]), c=s.config;
     const row=(a,b)=>`<div class="detail-row"><span>${a}</span><b>${esc(b)}</b></div>`;
@@ -178,16 +187,16 @@ function rulesTable(rules) {
 function openModal(title,content) {
   modal.innerHTML=`<div class="modal-head"><h2 id="modal-title">${title}</h2>${button('close-modal','','close','icon-btn','aria-label="Close dialog"')}</div>${content}`;
   if (!modal.open) modal.showModal();
-  modal.querySelector('input,textarea')?.focus();
+  modal.querySelector('input:not([type=hidden]),textarea,select')?.focus();
 }
 function ruleModal(rule={}) {
   openModal(rule.id?'Edit your rule':'Make a rule.',`<form id="rule-form" class="form-stack"><div class="row"><label>Domain<input name="domain" value="${esc(rule.domain || '')}" placeholder="example.com" required maxlength="253" ${rule.id?'readonly':''}></label><label>Action<select name="action"><option value="block" ${rule.action==='block'?'selected':''}>Block</option><option value="allow" ${rule.action==='allow'?'selected':''}>Allow</option></select></label></div><label>Note <small>Optional. A little context helps future you.</small><input name="note" value="${esc(rule.note || '')}" maxlength="256" placeholder="Why this rule exists"></label><small>Includes all subdomains. Allow rules override blocks, including blocks on more specific subdomains.</small><div class="form-error error-text" role="alert"></div><div class="modal-actions">${button('close-modal','Cancel')}<button class="primary" type="submit">Save rule</button></div></form>`);
 }
-async function confirmAction(title, message, action) {
+async function confirmAction(title, message, action, after) {
   openModal(title, `<p>${esc(message)}</p><div class="modal-actions">${button('close-modal','Cancel')}<button type="button" id="confirm-action" class="primary">Confirm</button></div>`);
   document.querySelector('#confirm-action').addEventListener('click', async event=>{
     event.target.disabled=true;
-    try { await action(); modal.close(); await navigate(currentView); } catch(error) { toast(error.message,true); event.target.disabled=false; }
+    try { const result=await action(); modal.close(); await navigate(currentView); if(after) after(result); } catch(error) { toast(error.message,true); event.target.disabled=false; }
   });
 }
 document.addEventListener('click', async event=>{
@@ -198,6 +207,22 @@ document.addEventListener('click', async event=>{
   const action=el.dataset.action;
   try {
     switch(action) {
+      case 'endpoint-enroll': endpointModal(); break;
+      case 'endpoint-edit': endpointModal(el.dataset.id); break;
+      case 'endpoint-export': downloadEndpoint(); break;
+      case 'endpoint-quarantine': {
+        const endpoint=endpointData.devices.find(d=>d.id===el.dataset.id);
+        await confirmAction(endpoint.quarantined?'Restore approved connections?':'Quarantine this endpoint?', endpoint.quarantined?'The agent will restore the approved network policy at its next refresh.':'Only its management connection, loopback, and configured address discovery will remain available.',()=>api(`/endpoints/${endpoint.id}`,'POST',{revision:endpoint.revision,network:JSON.parse(endpoint.network),quarantined:!endpoint.quarantined}));
+        break;
+      }
+      case 'browser-enroll': browserProfileModal(el.dataset.id); break;
+      case 'browser-rotate': await confirmAction('Replace this profile token?', 'This reactivates the profile and invalidates its previous token. Copy the replacement into the enrolled browser.', async()=>{return await api(`/browser/profiles/${el.dataset.id}/rotate`,'POST');},showEnrollment); break;
+      case 'browser-rule': browserRuleModal(el.dataset.id); break;
+      case 'browser-category': browserCategoryModal(el.dataset.id); break;
+      case 'browser-preview': browserPreviewModal(); break;
+      case 'browser-revoke': await confirmAction('Revoke this browser profile?', 'Its credential will stop authorizing browser requests.', ()=>api(`/browser/profiles/${el.dataset.id}/revoke`,'POST')); break;
+      case 'browser-delete-rule': await saveBrowserPolicy({...browserData.policy,rules:browserData.policy.rules.filter(r=>r.id!==el.dataset.id)}); break;
+      case 'browser-delete-category': await saveBrowserPolicy({...browserData.policy,categories:browserData.policy.categories.filter(c=>c.id!==el.dataset.id)}); break;
       case 'close-modal': modal.close(); break;
       case 'reload': await navigate(currentView); break;
       case 'logout': await api('/logout','POST'); session=null; showLogin(); break;
@@ -244,7 +269,13 @@ document.addEventListener('submit',async event=>{
   if(errorEl) errorEl.textContent='';
   submit.disabled=true;
   try {
-    switch(form.id) {
+    switch(form.getAttribute('id')) {
+      case 'endpoint-form': await saveEndpoint(data); break;
+      case 'browser-profile-form': await enrollBrowser(data); break;
+      case 'browser-rule-form': await saveBrowserRule(data); break;
+      case 'browser-category-form': await saveBrowserCategory(data); break;
+      case 'browser-default-form': await saveBrowserPolicy({...browserData.policy,default_action:data.default_action}); break;
+      case 'browser-preview-form': { const result=await api('/browser/preview','POST',{profile_id:Number(data.profile_id),url:data.url,text:data.text}); document.querySelector('#browser-preview-result').textContent=JSON.stringify(result.verdict,null,2); break; }
       case 'login-form':
         session=await api('/login','POST',data);
         shell(); await navigate(views[location.hash.slice(1)]?location.hash.slice(1):'overview'); break;
@@ -272,3 +303,93 @@ setInterval(()=>{ if(session && currentView==='overview' && !modal.open && !docu
   try { session=await api('/me'); shell(); await navigate(views[location.hash.slice(1)]?location.hash.slice(1):'overview'); }
   catch { showLogin(); }
 })();
+
+function renderBrowser({policy,profiles,events}) {
+  const actions=[['allow','Allow'],['block','Block'],['sanitize','Sanitized reader']];
+  return head('Protection follows the desktop profile.','Check destinations, categorize pages, and apply rules from the top down.',button('browser-preview','Test a page','terminal')+button('browser-enroll','Enroll a profile','plus','primary'))
+  + `<div class="notice">DNS blocks apply first. Browser rules run in organization → group → profile order, then by ascending priority and rule ID. The first match wins. An unavailable portal pauses navigation.</div>`
+  + `<section class="panel"><div class="panel-head"><div><h2>Browser rules</h2><p>Revision ${policy.revision} · paths include their descendants; category evidence can block or sanitize.</p></div>${button('browser-rule','Add browser rule','plus')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Scope</th><th>Priority</th><th>Match</th><th>Action</th><th>Manage</th></tr></thead><tbody>${policy.rules.map(r=>`<tr><td>${esc(r.scope)} ${esc(r.target)}</td><td>${r.priority}</td><td>${esc(r.kind)} <span class="mono">${esc(r.pattern || 'Every page')}</span>${r.enabled?'':' · disabled'}</td><td>${esc(r.action)}</td><td class="browser-actions">${button('browser-rule','Edit',null,'text-button',`data-id="${esc(r.id)}"`)}${button('browser-delete-rule','Remove',null,'text-button',`data-id="${esc(r.id)}"`)}</td></tr>`).join('') || '<tr><td colspan="5">No browser rules yet. DNS protection and the default below still apply.</td></tr>'}</tbody></table></div>
+  <form id="browser-default-form" class="filters"><label>When no rule matches <select name="default_action">${actions.map(([a,n])=>`<option value="${a}" ${policy.default_action===a?'selected':''}>${n}</option>`).join('')}</select></label><button type="submit">Save default</button><span class="form-error error-text" role="alert"></span></form></section>
+  <section class="panel"><div class="panel-head"><div><h2>Page categories</h2><p>Explainable domain and phrase matching. Add a category rule above to enforce it.</p></div>${button('browser-category','Add category','plus')}</div><div class="table-wrap"><table><thead><tr><th>Category</th><th>Domains</th><th>Distinct phrase threshold</th><th>Manage</th></tr></thead><tbody>${policy.categories.map(c=>`<tr><td>${esc(c.name)}<br><small>${esc(c.id)}</small></td><td>${esc(c.domains.join(', ') || 'None')}</td><td>${c.terms.length?`${c.threshold} of ${c.terms.length}`:'Domain only'}${c.id==='unclassified'?' · no evidence':''}</td><td class="browser-actions">${button('browser-category','Edit',null,'text-button',`data-id="${esc(c.id)}"`)}${button('browser-delete-category','Remove',null,'text-button',`data-id="${esc(c.id)}"`)}</td></tr>`).join('')}</tbody></table></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Enrolled desktop profiles</h2><p>Use a separate credential for each OS account. Native identity uses a Unix UID or Windows SID.</p></div></div><div class="table-wrap"><table><thead><tr><th>Profile</th><th>Group</th><th>Desktop identity</th><th>Last seen</th><th>Status</th></tr></thead><tbody>${profiles.map(p=>`<tr><td>${esc(p.name)}<br><small>Profile ${p.id}</small></td><td>${esc(p.group_name || 'No group')}</td><td>${p.require_native?`${esc(p.os)} · ${esc(p.account_id)}`:'Token enrollment'}</td><td>${date(p.last_seen)}</td><td class="browser-actions">${button('browser-enroll','Edit',null,'text-button',`data-id="${p.id}"`)}${button('browser-rotate','New token',null,'text-button',`data-id="${p.id}"`)}${p.revoked?'Revoked':button('browser-revoke','Revoke',null,'text-button danger',`data-id="${p.id}"`)}</td></tr>`).join('') || '<tr><td colspan="5">Enroll a profile, then load the extension and enter its token.</td></tr>'}</tbody></table></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Browser decisions</h2><p>Latest 100 checks · URL query strings and page text are not stored in this history.</p></div>${button('reload','Refresh','refresh')}</div><div class="table-wrap"><table><thead><tr><th>Time / profile</th><th>Destination</th><th>Decision</th><th>Evidence</th></tr></thead><tbody>${events.map(([at,name,url,action,reason,categories])=>`<tr><td>${date(at)}<br>${esc(name)}</td><td class="domain" title="${esc(url)}">${esc(url)}</td><td>${esc(action)}</td><td>${esc(reason)}<br><small>${esc(categories)}</small></td></tr>`).join('') || '<tr><td colspan="4">Browser checks will appear here after enrollment.</td></tr>'}</tbody></table></div></section>`;
+}
+function browserProfileModal(id) {
+  const p=browserData.profiles.find(p=>p.id===Number(id)) || {name:'',group_name:'',os:'',account_id:'',require_native:false};
+  openModal(id?'Edit desktop profile':'Enroll a desktop profile',`<form id="browser-profile-form" class="form-stack"><input type="hidden" name="id" value="${id || ''}"><label>Profile name<input name="name" required maxlength="80" value="${esc(p.name)}" placeholder="Alex · work laptop"></label><label>Policy group<input name="group_name" maxlength="80" value="${esc(p.group_name)}" placeholder="Students"></label><div class="row"><label>Operating system<select name="os">${[['','Not bound'],['linux','Linux'],['windows','Windows'],['macos','macOS']].map(([v,n])=>`<option value="${v}" ${p.os===v?'selected':''}>${n}</option>`).join('')}</select></label><label>OS account ID<input name="account_id" maxlength="256" value="${esc(p.account_id)}" placeholder="UID or Windows SID"></label></div><label>Identity requirement<select name="require_native"><option value="false" ${p.require_native?'':'selected'}>Profile token</option><option value="true" ${p.require_native?'selected':''}>Native desktop identity required</option></select></label><p class="small">Run <code>wtp-native --identity</code> on the desktop to find its account ID. Native identity is a local account report, not hardware attestation.</p><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">${id?'Save profile':'Create profile token'}</button></form>`);
+}
+function showEnrollment(result) {
+  openModal('Profile enrolled',`<p>Copy this token into the extension on this desktop account. It is displayed only once.</p><label>Portal<input readonly value="${esc(result.portal)}"></label><label>Profile token<input readonly value="${esc(result.token)}" aria-label="New profile token"></label><p>Profile ID: ${result.id}. Load the repository’s <code>extension/</code> folder in Chrome, Edge, or Chromium, then open its settings.</p>${button('close-modal','Done')}`);
+}
+async function enrollBrowser(data) {
+  const {id,...profile}=data;
+  const result=await api(id?`/browser/profiles/${id}`:'/browser/profiles','POST',{...profile,require_native:data.require_native==='true'});
+  if(id) {modal.close();toast('Desktop profile updated.');} else showEnrollment(result);
+  await navigate('browser');
+}
+function browserRuleModal(id) {
+  const r=browserData.policy.rules.find(r=>r.id===id) || {id:'rule-'+crypto.randomUUID().slice(0,8),scope:'global',target:'',priority:100,kind:'domain',pattern:'',action:'block',enabled:true};
+  const select=(name,items,current)=>`<select name="${name}">${items.map(([v,l])=>`<option value="${v}" ${v===current?'selected':''}>${l}</option>`).join('')}</select>`;
+  openModal(id?'Edit browser rule':'Add browser rule',`<form id="browser-rule-form" class="form-stack"><input type="hidden" name="id" value="${esc(r.id)}"><div class="row"><label>Scope${select('scope',[['global','Organization'],['group','Group'],['profile','Desktop profile']],r.scope)}</label><label>Group name or profile ID<input name="target" value="${esc(r.target)}" maxlength="80" placeholder="Leave empty for organization"></label></div><div class="row"><label>Priority<input type="number" name="priority" value="${r.priority}" min="0" max="100000" required></label><label>Match${select('kind',[['domain','Domain + subdomains'],['path','URL path + descendants'],['category','Page category'],['all','Every page']],r.kind)}</label></div><label>Pattern<input name="pattern" value="${esc(r.pattern)}" maxlength="4096" placeholder="example.com, https://example.com/path, or category ID"></label><small>Category IDs: ${browserData.policy.categories.map(c=>esc(c.id)).join(', ')}. Leave the pattern empty for every page.</small><div class="row"><label>Action${select('action',[['block','Block'],['allow','Allow'],['sanitize','Sanitized reader']],r.action)}</label><label>Status${select('enabled',[['true','Enabled'],['false','Disabled']],String(r.enabled))}</label></div><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">Save browser rule</button></form>`);
+}
+async function saveBrowserRule(data) {
+  const rule={...data,priority:Number(data.priority),enabled:data.enabled==='true'};
+  await saveBrowserPolicy({...browserData.policy,rules:[...browserData.policy.rules.filter(r=>r.id!==rule.id),rule]});
+}
+function browserCategoryModal(id) {
+  const c=browserData.policy.categories.find(c=>c.id===id) || {id:'',name:'',domains:[],terms:[],threshold:1};
+  openModal(id?'Edit category':'Add category',`<form id="browser-category-form" class="form-stack"><div class="row"><label>Category ID<input name="id" value="${esc(c.id)}" required maxlength="64" pattern="[A-Za-z0-9_-]+" ${id?'readonly':''}></label><label>Name<input name="name" value="${esc(c.name)}" required maxlength="80"></label></div><label>Domains <small>One per line; includes subdomains</small><textarea name="domains" rows="3">${esc(c.domains.join('\n'))}</textarea></label><label>Content phrases <small>One per line; whole words, case insensitive</small><textarea name="terms" rows="4">${esc(c.terms.join('\n'))}</textarea></label><label>Distinct phrases required<input type="number" name="threshold" value="${c.threshold}" min="1" max="50" required></label><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">Save category</button></form>`);
+}
+async function saveBrowserCategory(data) {
+  const lines=value=>value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const category={id:data.id,name:data.name,domains:lines(data.domains),terms:lines(data.terms),threshold:Number(data.threshold)};
+  await saveBrowserPolicy({...browserData.policy,categories:[...browserData.policy.categories.filter(c=>c.id!==category.id),category]});
+}
+async function saveBrowserPolicy(policy) {
+  await api('/browser/policy','POST',policy);modal.close();toast('Browser policy saved. New checks use this revision.');await navigate('browser');
+}
+function browserPreviewModal() {
+  openModal('Test a page for a desktop profile',`<form id="browser-preview-form" class="form-stack"><label>Desktop profile<select name="profile_id" required>${browserData.profiles.filter(p=>!p.revoked).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label><label>URL<input name="url" type="url" required placeholder="https://example.com/path"></label><label>Sample page text<textarea name="text" rows="4" maxlength="32000" placeholder="Optional text to test inferred categories"></textarea></label><small>This preview assumes the enrolled OS identity matches. It does not visit the destination.</small><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">Evaluate page</button><pre id="browser-preview-result" class="browser-verdict"></pre></form>`);
+}
+
+function renderEndpoints({devices,public_key}) {
+  return head('Control the whole desktop.', 'Publish signed network policies to privileged endpoint agents.', button('reload','Refresh','refresh')+button('endpoint-enroll','Enroll an endpoint','plus','primary'))
+  + `<div class="notice">Endpoint rules allow only approved IP addresses, ports, and physical interfaces. Add your management server and an approved web gateway before activation. Browser profiles control page access separately. An expired policy puts the endpoint into management-only quarantine.</div>
+  <section class="panel"><div class="panel-head"><div><h2>Managed endpoints</h2><p>Status is reported by each agent. A recent report is not hardware attestation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Published policy</th><th>Agent report</th><th>Last seen</th><th>Manage</th></tr></thead><tbody>${devices.map(d=>`<tr><td>${esc(d.name)}<br><small>${esc(d.platform)} · ${esc(d.control)}</small></td><td>Revision ${d.revision}<br>${d.quarantined?'Quarantine':'Approved connections'}</td><td>${!d.last_seen?'Not enrolled':Date.now()/1000-d.last_seen>90?'Offline / stale':esc(d.reported_state)}<br><small>Reported revision ${d.reported_revision} · ${esc(d.detail)}</small></td><td>${date(d.last_seen)}</td><td class="browser-actions">${button('endpoint-edit','Edit policy',null,'text-button',`data-id="${d.id}"`)}${button('endpoint-quarantine',d.quarantined?'Restore':'Quarantine',null,'text-button',`data-id="${d.id}"`)}</td></tr>`).join('') || '<tr><td colspan="5">No endpoints enrolled. Create a policy and install its agent with administrator access.</td></tr>'}</tbody></table></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Policy verification key</h2><p>The enrollment file pins this portal’s Ed25519 public key.</p><code class="endpoint-key">${esc(public_key)}</code></div></div></section>`;
+}
+function endpointModal(id) {
+  const d=endpointData.devices.find(d=>d.id===id);
+  const n=d?JSON.parse(d.network):{interfaces:[],dns_servers:[],allowed_tcp:[],allowed_udp:[],dhcp:true};
+  openModal(d?'Edit endpoint policy':'Enroll an endpoint',`<form id="endpoint-form" class="form-stack"><input type="hidden" name="id" value="${id || ''}"><input type="hidden" name="revision" value="${d?.revision || 0}">
+  ${d?`<p>Publishing a revision for ${esc(d.name)}. Changes arrive at the next agent refresh.</p>`:`<label>Endpoint name<input name="name" required maxlength="80" placeholder="Alex · managed laptop"></label><label>Operating system<select name="platform"><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select></label><label>Management server IP:port<input name="control" required placeholder="192.0.2.10:443"></label>`}
+  <label>Approved physical interfaces <small>One per line; fixed at enrollment</small><textarea name="interfaces" rows="2" required ${d?'readonly':''} placeholder="eth0, Ethernet, or en0 — one actual interface per line">${esc(n.interfaces.join('\n'))}</textarea></label>
+  <label>Approved DNS server IPs <small>One per line</small><textarea name="dns_servers" rows="2">${esc(n.dns_servers.join('\n'))}</textarea></label>
+  <label>Approved TCP destinations <small>One IP:port per line; IPv6 uses [address]:port</small><textarea name="allowed_tcp" rows="4" placeholder="192.0.2.20:443">${esc(n.allowed_tcp.join('\n'))}</textarea></label>
+  <label>Approved UDP destinations <small>DNS uses the resolver list above</small><textarea name="allowed_udp" rows="2">${esc(n.allowed_udp.join('\n'))}</textarea></label>
+  <label>Address configuration<select name="dhcp"><option value="true" ${n.dhcp?'selected':''}>Allow DHCP</option><option value="false" ${n.dhcp?'':'selected'}>Static address only</option></select></label>
+  <p class="small">The management destination is always retained. All other connections are blocked. Use a console or recovery channel for first activation.</p><div class="form-error error-text" role="alert"></div><button class="primary" type="submit">${d?'Publish policy':'Create enrollment file'}</button></form>`);
+}
+async function saveEndpoint(data) {
+  const lines=value=>value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
+  const d=endpointData.devices.find(d=>d.id===data.id);
+  const network={interfaces:lines(data.interfaces),dns_servers:lines(data.dns_servers),allowed_tcp:lines(data.allowed_tcp),allowed_udp:lines(data.allowed_udp),dhcp:data.dhcp==='true'};
+  const control=d?.control || data.control.trim();
+  if(!network.allowed_tcp.includes(control)) network.allowed_tcp.push(control);
+  if(d) {
+    await api(`/endpoints/${d.id}`,'POST',{revision:Number(data.revision),network,quarantined:d.quarantined});
+    modal.close();await navigate('endpoints');toast('Signed policy published. Check the agent’s reported revision.');
+  } else {
+    const result=await api('/endpoints','POST',{name:data.name,platform:data.platform,control,network});
+    endpointEnrollment=result.config;
+    modal.close();await navigate('endpoints');
+    openModal('Save endpoint enrollment',`<p>Download this file once and transfer it securely to the endpoint administrator. It contains a private device credential and the pinned policy key.</p><p>Install the matching agent with the instructions in <code>docs/endpoint-enforcement.md</code>. Installation requires administrator access and changes the device firewall.</p>${button('endpoint-export','Download enrollment JSON','devices','primary')}`);
+  }
+}
+function downloadEndpoint() {
+  if(!endpointEnrollment) return;
+  const url=URL.createObjectURL(new Blob([JSON.stringify(endpointEnrollment,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download='endpoint-config.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  endpointEnrollment=null;modal.close();
+}

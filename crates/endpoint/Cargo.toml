@@ -1,0 +1,24 @@
+[package]
+name = "wtp-endpoint"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.91"
+license = "AGPL-3.0-or-later"
+
+[[bin]]
+name = "wtp-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"

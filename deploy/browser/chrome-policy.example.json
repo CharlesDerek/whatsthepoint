@@ -1,0 +1,28 @@
+{
+  "ExtensionSettings": {
+    "*": {"installation_mode": "blocked"},
+    "REPLACE_WITH_EXTENSION_ID": {
+      "installation_mode": "force_installed",
+      "update_url": "https://REPLACE_WITH_YOUR_SIGNED_EXTENSION_UPDATE_FEED/updates.xml"
+    }
+  },
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "DeveloperToolsAvailability": 2,
+  "DnsOverHttpsMode": "off",
+  "NativeMessagingBlocklist": ["*"],
+  "NativeMessagingAllowlist": ["org.whatsthepoint.identity"],
+  "NativeMessagingUserLevelHosts": false,
+  "3rdparty": {
+    "extensions": {
+      "REPLACE_WITH_EXTENSION_ID": {
+        "policy": {
+          "portal": "https://REPLACE_WITH_PORTAL_ORIGIN",
+          "token": "REPLACE_WITH_THIS_OS_ACCOUNT_PROFILE_TOKEN",
+          "requireNative": true
+        }
+      }
+    }
+  }
+}

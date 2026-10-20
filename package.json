@@ -2,8 +2,8 @@
   "name": "whatsthepoint-console-tests",
   "private": true,
   "scripts": {
-    "test": "playwright test",
-    "check": "node --check web/app.js"
+    "test": "node --test tests/extension/policy.test.mjs && playwright test",
+    "check": "node scripts/check-js.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2"

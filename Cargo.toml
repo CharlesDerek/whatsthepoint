@@ -1,9 +1,9 @@
 [package]
 name = "whatsthepoint"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.91"
-description = "A small, opinionated DNS filter with an unusually honest name."
+description = "Portal-managed DNS, browser, and endpoint filtering with desktop profiles."
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/CharlesDerek/whatsthepoint"
 default-run = "wtp"
@@ -13,6 +13,7 @@ name = "wtp"
 path = "src/main.rs"
 
 [dependencies]
+wtp-endpoint = { path = "crates/endpoint" }
 anyhow = "1"
 argon2 = "0.5"
 axum = "0.8"
@@ -43,3 +44,8 @@ tower = { version = "0.5", features = ["util"] }
 [profile.release]
 lto = "thin"
 strip = true
+
+[workspace]
+members = ["crates/endpoint"]
+default-members = [".", "crates/endpoint"]
+resolver = "3"

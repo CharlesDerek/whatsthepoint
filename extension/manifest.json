@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "What's the Point — Browser Protection",
+  "version": "0.2.0",
+  "minimum_chrome_version": "121",
+  "description": "Portal-managed URL checks, content categories, desktop profiles, and a sanitized reader.",
+  "permissions": ["storage", "declarativeNetRequest", "webNavigation", "alarms", "nativeMessaging"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "options_page": "options.html",
+  "action": {"default_title": "What's the Point — enrollment and status"},
+  "storage": {"managed_schema": "managed-schema.json"},
+  "declarative_net_request": {"rule_resources": [{"id": "guard", "enabled": true, "path": "guard.json"}]},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": false}],
+  "web_accessible_resources": [{"resources": ["gate.html"], "matches": ["http://*/*", "https://*/*"]}],
+  "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; style-src 'self'; img-src 'none'; connect-src http: https:; frame-src 'none'; base-uri 'none'; form-action 'none'"},
+  "incognito": "not_allowed"
+}

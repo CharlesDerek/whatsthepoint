@@ -1,0 +1,40 @@
+name: Sign managed endpoint release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sign:
+    # Dedicated, administrator-managed runners hold native signing identities.
+    # Configure the release environment and review its deployment protection rules.
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: '["self-hosted", "Linux", "wtp-signing"]'
+            platform: linux
+          - runner: '["self-hosted", "Windows", "wtp-signing"]'
+            platform: windows
+          - runner: '["self-hosted", "macOS", "wtp-signing"]'
+            platform: macos
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --release --locked
+      - name: Sign binaries and verify archive
+        run: python scripts/release/package-native.py
+        env:
+          WTP_RELEASE_PRIVATE_KEY: ${{ secrets.WTP_RELEASE_PRIVATE_KEY }}
+          WTP_RELEASE_PUBLIC_KEY: ${{ vars.WTP_RELEASE_PUBLIC_KEY }}
+          WTP_WINDOWS_THUMBPRINT: ${{ vars.WTP_WINDOWS_THUMBPRINT }}
+          WTP_APP_IDENTITY: ${{ vars.WTP_APP_IDENTITY }}
+          WTP_INSTALLER_IDENTITY: ${{ vars.WTP_INSTALLER_IDENTITY }}
+          WTP_NOTARY_PROFILE: ${{ vars.WTP_NOTARY_PROFILE }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wtp-signed-${{ matrix.platform }}
+          path: signed-dist/*
+          if-no-files-found: error

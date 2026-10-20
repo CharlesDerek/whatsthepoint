@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use sqlx::FromRow;
 use std::net::SocketAddr;
 
-pub struct ApiError(StatusCode, String);
+pub struct ApiError(pub(crate) StatusCode, pub(crate) String);
 type Result<T> = std::result::Result<T, ApiError>;
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -36,7 +36,7 @@ impl From<sqlx::Error> for ApiError {
         anyhow::Error::from(e).into()
     }
 }
-fn bad(message: impl Into<String>) -> ApiError {
+pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, message.into())
 }
 fn unauthorized() -> ApiError {
@@ -44,8 +44,8 @@ fn unauthorized() -> ApiError {
 }
 
 #[derive(Clone, FromRow)]
-struct Session {
-    username: String,
+pub(crate) struct Session {
+    pub(crate) username: String,
     csrf: String,
 }
 
@@ -102,6 +102,8 @@ pub fn router(app: App) -> Router {
         .route("/api/lists/{id}", delete(delete_list))
         .route("/api/lists/{id}/refresh", post(refresh_list))
         .route("/api/settings", get(settings))
+        .merge(crate::browser_api::routes())
+        .merge(crate::endpoint_api::routes())
         .layer(DefaultBodyLimit::max(feeds::MAX_LIST_BYTES + 1024))
         .layer(middleware::from_fn_with_state(app.clone(), gate))
         .with_state(app)
@@ -136,8 +138,15 @@ async fn gate(State(app): State<App>, mut request: Request, next: Next) -> Respo
                 "Use the configured console address.".into(),
             ));
         }
+        let agent = matches!(request.uri().path(), "/agent/check" | "/agent/policy");
         if let Some(origin) = request.headers().get(header::ORIGIN)
             && origin.to_str().ok() != Some(app.config.public_origin.as_str())
+            && !(agent
+                && origin.to_str().ok().is_some_and(|o| {
+                    o.strip_prefix("chrome-extension://").is_some_and(|id| {
+                        id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+                    })
+                }))
         {
             return Err(ApiError(StatusCode::FORBIDDEN, "Origin rejected.".into()));
         }

@@ -48,6 +48,12 @@ pub async fn prune(pool: &SqlitePool, days: u32, max: u32) -> anyhow::Result<()>
         .await?;
     sqlx::query("DELETE FROM queries WHERE id <= (SELECT id FROM queries ORDER BY id DESC LIMIT 1 OFFSET ?)")
         .bind(max).execute(pool).await?;
+    sqlx::query("DELETE FROM browser_events WHERE at < ?")
+        .bind(crate::now() - i64::from(days) * 86400)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM browser_events WHERE id <= (SELECT id FROM browser_events ORDER BY id DESC LIMIT 1 OFFSET ?)")
+        .bind(max).execute(pool).await?;
     sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
         .bind(crate::now())
         .execute(pool)

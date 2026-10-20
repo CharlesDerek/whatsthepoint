@@ -24,7 +24,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - run: cargo test --workspace --locked
+      - run: cargo build --locked -p wtp-endpoint
+      - run: python scripts/check-platform-plans.py
       - run: python scripts/check-dependencies.py
       - run: cargo build --release --locked
       - uses: actions/upload-artifact@v4
@@ -33,9 +35,13 @@ jobs:
           path: |
             target/release/wtp
             target/release/wtp.exe
+            target/release/wtp-native
+            target/release/wtp-native.exe
+            target/release/wtp-agent
+            target/release/wtp-agent.exe
           if-no-files-found: error
   browser:
-    name: Console · Chromium
+    name: Console and extension · Chromium
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +55,10 @@ jobs:
       - run: npm run check
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      - name: Verify release and CRX signatures
+        run: python3 tests/endpoint/release_probe.py --chrome "$(node -e "process.stdout.write(require('playwright').chromium.executablePath())")"
+      - name: Kernel enforcement in disposable network namespaces
+        run: python3 scripts/linux-integration.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,4 +1,4 @@
-name: Package release
+name: Package unsigned development release
 on:
   push:
     tags: ['v*']
@@ -35,9 +35,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p package
-          cp target/${{ matrix.target }}/release/wtp package/
+          cp target/${{ matrix.target }}/release/wtp target/${{ matrix.target }}/release/wtp-native target/${{ matrix.target }}/release/wtp-agent package/
           cp README.md LICENSE SECURITY.md THIRD_PARTY.md package/
-          cp -r deploy docs package/
+          cp -r deploy docs extension package/
           tar -czf wtp-${{ matrix.target }}.tar.gz -C package .
           shasum -a 256 wtp-${{ matrix.target }}.tar.gz > wtp-${{ matrix.target }}.sha256
       - name: Archive Windows executable and deployment files
@@ -45,9 +45,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory package
-          Copy-Item target/${{ matrix.target }}/release/wtp.exe package/
+          Copy-Item target/${{ matrix.target }}/release/wtp.exe,target/${{ matrix.target }}/release/wtp-native.exe,target/${{ matrix.target }}/release/wtp-agent.exe package/
           Copy-Item README.md,LICENSE,SECURITY.md,THIRD_PARTY.md package/
-          Copy-Item -Recurse deploy,docs package/
+          Copy-Item -Recurse deploy,docs,extension package/
           Compress-Archive -Path package/* -DestinationPath wtp-${{ matrix.target }}.zip
           $Hash = (Get-FileHash wtp-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower()
           "$Hash  wtp-${{ matrix.target }}.zip" | Set-Content wtp-${{ matrix.target }}.sha256

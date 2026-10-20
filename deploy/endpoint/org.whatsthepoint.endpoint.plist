@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>org.whatsthepoint.endpoint</string>
+<key>ProgramArguments</key><array><string>/usr/local/libexec/wtp/wtp-agent</string><string>run</string><string>--config</string><string>/Library/Application Support/WhatsThePoint/Endpoint/config.json</string><string>--state-dir</string><string>/Library/Application Support/WhatsThePoint/Endpoint</string></array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>2</integer>
+<key>UserName</key><string>root</string><key>Umask</key><integer>63</integer>
+<key>StandardOutPath</key><string>/var/log/wtp-endpoint.log</string><key>StandardErrorPath</key><string>/var/log/wtp-endpoint.log</string>
+</dict></plist>

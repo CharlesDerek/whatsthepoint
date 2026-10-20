@@ -1,0 +1,29 @@
+[Unit]
+Description=What's the Point signed endpoint enforcement
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/libexec/wtp/wtp-agent bootstrap --config /etc/wtp-endpoint/config.json --state-dir /var/lib/wtp-endpoint
+ExecStart=/usr/local/libexec/wtp/wtp-agent run --config /etc/wtp-endpoint/config.json --state-dir /var/lib/wtp-endpoint
+Restart=always
+RestartSec=2
+StateDirectory=wtp-endpoint
+StateDirectoryMode=0700
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ReadWritePaths=/var/lib/wtp-endpoint
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
